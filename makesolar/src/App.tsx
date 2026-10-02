@@ -2,34 +2,15 @@ import { useState } from "react";
 import SolarScene from "./scene/SolarScene";
 import type { RoofParams } from "./types/roof";
 import { computePanelLayout } from "./geometry/panelLayout";
-import { computeBlockLayout } from "./geometry/blockLayout";
+import { computeBlockLayout, blockSpansTwoRibs } from "./geometry/blockLayout";
+import { DEFAULT_PROFILE, getRibCenters } from "./geometry/roofProfile";
+import { DEFAULT_PANEL } from "./types/panel";
 
-const PANEL_GAP = 0.025;  // проміжок між панелями, м
-const EDGE_MARGIN = 0.3;  // відступ від панелей до країв даху, м
-
-const layout = computePanelLayout({
-  roofWidth: 10,
-  roofLength: 6,
-  panelWidth: 1.1,
-  panelHeight: 1.7,
-  gap: PANEL_GAP,
-  margin: EDGE_MARGIN,
-});
-console.log("всього:", layout.total, "колонок:", layout.cols, "рядів:", layout.rows);
-console.log("перша:", layout.placements[0]);
-console.log("остання:", layout.placements[layout.placements.length - 1]);
-
-const blocks = computeBlockLayout({
-  layout,
-  panelWidth: 1.1,
-  panelHeight: 1.7,
-  blockLength: 0.3,
-  endInsetRatio: 0.25,
-  edgeOverhang: 0.03,
-});
-console.log("блоків:", blocks.length);
-console.log("перший:", blocks[0]);
-console.log("останній:", blocks[blocks.length - 1]);
+const PANEL_WIDTH = DEFAULT_PANEL.width;   // вздовж карниза (X), м
+const PANEL_HEIGHT = DEFAULT_PANEL.height;  // вздовж схилу (Z), м
+const PANEL_GAP = 0.025;   // проміжок між панелями, м
+const EDGE_MARGIN = 0.3;   // відступ від країв даху, м
+const BLOCK_LENGTH = 0.3;  // довжина блока, м
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -39,6 +20,33 @@ function App() {
   const [tilt, setTilt] = useState(30);
 
   const roof: RoofParams = { width: 10, length: 6, tilt };
+
+  const layout = computePanelLayout({
+    roofWidth: roof.width,
+    roofLength: roof.length,
+    panelWidth: PANEL_WIDTH,
+    panelHeight: PANEL_HEIGHT,
+    gap: PANEL_GAP,
+    margin: EDGE_MARGIN,
+  });
+
+  const ribCenters = getRibCenters(roof.width, DEFAULT_PROFILE);
+
+  const blocks = computeBlockLayout({
+    ribCenters,
+    layout,
+    panelWidth: PANEL_WIDTH,
+    panelHeight: PANEL_HEIGHT,
+    blockLength: BLOCK_LENGTH,
+    endInsetRatio: 0.25,
+    edgeOverhang: 0.03,
+  });
+
+  const blocksOk = blockSpansTwoRibs(
+  BLOCK_LENGTH,
+  ribCenters,
+  DEFAULT_PROFILE.ribTop
+);
 
   return (
     <div className="app">
@@ -53,10 +61,24 @@ function App() {
           onChange={(e) => setTilt(clamp(Number(e.target.value), 0, 90))}
         />
       </label>
-      <p>Поточний нахил: {tilt}°</p>
+      <p>
+        Панелей: {layout.total}, блоків: {blocks.length}
+      </p>
+      
+      {!blocksOk && (
+  <p style={{ color: "crimson" }}>
+    Блок закороткий: він не лягає на 2 хвилі профілю
+  </p>
+)}
 
       <div style={{ height: 500 }}>
-        <SolarScene roof={roof} />
+        <SolarScene
+  roof={roof}
+  panel={DEFAULT_PANEL}
+  panels={layout.placements}
+  blocks={blocks}
+  blockLength={BLOCK_LENGTH}
+/>
       </div>
     </div>
   );

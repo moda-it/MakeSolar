@@ -44,3 +44,19 @@ export function buildProfileOutline(
 
   return [...top, ...bottom];
 }
+
+export function getRibCenters(
+  totalWidth: number,
+  profile: ProfileParams
+): number[] {
+  const waves = Math.max(1, Math.round(totalWidth / profile.pitch));
+  const pitch = totalWidth / waves;
+  const valley = pitch - profile.ribTop - 2 * profile.ribSlope;
+
+  const centers: number[] = [];
+  for (let i = 0; i < waves; i++) {
+    const x = i * pitch + valley + profile.ribSlope + profile.ribTop / 2;
+    centers.push(x - totalWidth / 2);
+  }
+  return centers;
+}

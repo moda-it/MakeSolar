@@ -12,6 +12,33 @@ export interface BlockLayoutInput {
   blockLength: number;    // довжина блока (20/30/40 см), м
   endInsetRatio: number;  // відступ ліній блоків від кінців панелі, частка довжини
   edgeOverhang: number;   // наскільки крайній блок виступає за край панелі, м
+  ribCenters: number[];   // координати центрів ребер профілю, м
+}
+
+function snapToValleyCenter(x: number, ribCenters: number[]): number {
+  if (ribCenters.length < 2) return x;
+
+  let best = x;
+  let bestDistance = Infinity;
+  for (let i = 0; i < ribCenters.length - 1; i++) {
+    const valleyCenter = (ribCenters[i] + ribCenters[i + 1]) / 2;
+    const distance = Math.abs(valleyCenter - x);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = valleyCenter;
+    }
+  }
+  return best;
+}
+
+export function blockSpansTwoRibs(
+  blockLength: number,
+  ribCenters: number[],
+  ribTop: number
+): boolean {
+  if (ribCenters.length < 2) return false;
+  const pitch = ribCenters[1] - ribCenters[0];
+  return blockLength >= pitch + ribTop;
 }
 
 export function computeBlockLayout(input: BlockLayoutInput): BlockPlacement[] {
@@ -22,6 +49,7 @@ export function computeBlockLayout(input: BlockLayoutInput): BlockPlacement[] {
     blockLength,
     endInsetRatio,
     edgeOverhang,
+    ribCenters,
   } = input;
 
   if (layout.total === 0) return [];
@@ -30,12 +58,14 @@ export function computeBlockLayout(input: BlockLayoutInput): BlockPlacement[] {
   const rowZs = layout.placements.filter((p) => p.col === 0).map((p) => p.z);
 
   const inward = blockLength / 2 - edgeOverhang;
-  const xs: number[] = [];
-  xs.push(colXs[0] - panelWidth / 2 + inward);
+  const rawXs: number[] = [];
+  rawXs.push(colXs[0] - panelWidth / 2 + inward);
   for (let i = 1; i < colXs.length; i++) {
-    xs.push((colXs[i - 1] + colXs[i]) / 2);
+    rawXs.push((colXs[i - 1] + colXs[i]) / 2);
   }
-  xs.push(colXs[colXs.length - 1] + panelWidth / 2 - inward);
+  rawXs.push(colXs[colXs.length - 1] + panelWidth / 2 - inward);
+
+  const xs = rawXs.map((x) => snapToValleyCenter(x, ribCenters));
 
   const inset = panelHeight * endInsetRatio;
   const blocks: BlockPlacement[] = [];

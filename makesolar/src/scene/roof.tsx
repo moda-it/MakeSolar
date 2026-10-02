@@ -58,7 +58,7 @@ function Roof({ params, children }: RoofProps) {
         geometry={geometry}
         position={[0, DEFAULT_PROFILE.thickness, -params.length / 2]}
       >
-        <meshStandardMaterial color="firebrick" />
+        <meshStandardMaterial color="gray" />
       </mesh>
       {children}
     </group>
