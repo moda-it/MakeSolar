@@ -1,0 +1,1 @@
+export type LayerMode = "roof" | "roofBlocks" | "all";

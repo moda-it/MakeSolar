@@ -11,3 +11,9 @@ export const DEFAULT_PANEL: PanelParams = {
   thickness: 0.035,
   power: 400,
 };
+
+export interface PlacedPanel {
+  id: number; // унікальний номер панелі
+  x: number;  // центр, локальні координати даху, м
+  z: number;
+}

@@ -1,18 +1,31 @@
-import type { LayoutResult } from "./panelLayout";
+import { DEFAULT_BLOCK_PROFILE } from "./blockProfile";
 
 export interface BlockPlacement {
   x: number; // центр блока, локальні координати даху, м
   z: number;
 }
 
-export interface BlockLayoutInput {
-  layout: LayoutResult;   // готова сітка панелей
-  panelWidth: number;     // розмір панелі вздовж X, м
-  panelHeight: number;    // розмір панелі вздовж Z, м
-  blockLength: number;    // довжина блока (20/30/40 см), м
-  endInsetRatio: number;  // відступ ліній блоків від кінців панелі, частка довжини
-  edgeOverhang: number;   // наскільки крайній блок виступає за край панелі, м
-  ribCenters: number[];   // координати центрів ребер профілю, м
+interface PanelPos {
+  x: number;
+  z: number;
+}
+
+interface Candidate {
+  x: number;
+  z: number;
+  side: "left" | "right";
+  used: boolean;
+}
+
+export interface BlocksForPanelsInput {
+  panels: PanelPos[];
+  panelWidth: number;
+  panelHeight: number;
+  blockLength: number;
+  endInsetRatio: number; // відступ ліній блоків від кінців панелі, частка довжини
+  edgeOverhang: number;  // наскільки крайній блок виступає за край панелі, м
+  ribCenters: number[];
+  mergeDistance: number; // максимальна відстань між краями, щоб блок став спільним, м
 }
 
 function snapToValleyCenter(x: number, ribCenters: number[]): number {
@@ -41,42 +54,63 @@ export function blockSpansTwoRibs(
   return blockLength >= pitch + ribTop;
 }
 
-export function computeBlockLayout(input: BlockLayoutInput): BlockPlacement[] {
+function canMerge(
+  a: Candidate,
+  b: Candidate,
+  mergeDistance: number,
+  zTolerance: number
+): boolean {
+  if (a.side === b.side) return false;
+  const rightC = a.side === "right" ? a : b;
+  const leftC = a.side === "left" ? a : b;
+  const dx = leftC.x - rightC.x;
+  return dx >= -1e-6 && dx <= mergeDistance && Math.abs(a.z - b.z) < zTolerance;
+}
+
+export function computeBlocksForPanels(
+  input: BlocksForPanelsInput
+): BlockPlacement[] {
   const {
-    layout,
+    panels,
     panelWidth,
     panelHeight,
     blockLength,
     endInsetRatio,
     edgeOverhang,
     ribCenters,
+    mergeDistance,
   } = input;
 
-  if (layout.total === 0) return [];
-
-  const colXs = layout.placements.filter((p) => p.row === 0).map((p) => p.x);
-  const rowZs = layout.placements.filter((p) => p.col === 0).map((p) => p.z);
-
   const inward = blockLength / 2 - edgeOverhang;
-  const rawXs: number[] = [];
-  rawXs.push(colXs[0] - panelWidth / 2 + inward);
-  for (let i = 1; i < colXs.length; i++) {
-    rawXs.push((colXs[i - 1] + colXs[i]) / 2);
-  }
-  rawXs.push(colXs[colXs.length - 1] + panelWidth / 2 - inward);
-
-  const xs = rawXs.map((x) => snapToValleyCenter(x, ribCenters));
-
   const inset = panelHeight * endInsetRatio;
-  const blocks: BlockPlacement[] = [];
-  for (const rowZ of rowZs) {
-    const zLines = [rowZ - panelHeight / 2 + inset, rowZ + panelHeight / 2 - inset];
+  const zTolerance = DEFAULT_BLOCK_PROFILE.totalWidth;
+
+  const candidates: Candidate[] = [];
+  for (const p of panels) {
+    const zLines = [p.z - panelHeight / 2 + inset, p.z + panelHeight / 2 - inset];
     for (const z of zLines) {
-      for (const x of xs) {
-        blocks.push({ x, z });
-      }
+      candidates.push({ x: p.x - panelWidth / 2, z, side: "left", used: false });
+      candidates.push({ x: p.x + panelWidth / 2, z, side: "right", used: false });
     }
   }
 
-  return blocks;
+  const raw: BlockPlacement[] = [];
+  for (const a of candidates) {
+    if (a.used) continue;
+    a.used = true;
+
+    const partner = candidates.find(
+      (b) => !b.used && canMerge(a, b, mergeDistance, zTolerance)
+    );
+
+    if (partner) {
+      partner.used = true;
+      raw.push({ x: (a.x + partner.x) / 2, z: (a.z + partner.z) / 2 });
+    } else {
+      const x = a.side === "left" ? a.x + inward : a.x - inward;
+      raw.push({ x, z: a.z });
+    }
+  }
+
+  return raw.map((b) => ({ x: snapToValleyCenter(b.x, ribCenters), z: b.z }));
 }
