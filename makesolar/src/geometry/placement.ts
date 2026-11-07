@@ -5,6 +5,13 @@ export interface Pos {
   z: number;
 }
 
+export interface Rect {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+}
+
 export interface PlacementRules {
   roofWidth: number;
   roofLength: number;
@@ -13,6 +20,8 @@ export interface PlacementRules {
   gap: number;
   margin: number;
   snapDistance: number;
+  obstacles: Rect[];
+  obstacleClearance: number;
 }
 
 function getBounds(r: PlacementRules) {
@@ -62,9 +71,22 @@ export function snapPosition(cursor: Pos, others: Pos[], r: PlacementRules): Pos
   return { x: clamp(x, minX, maxX), z: clamp(z, minZ, maxZ) };
 }
 
+export function hitsObstacle(pos: Pos, r: PlacementRules): boolean {
+  const eps = 1e-6;
+  for (const o of r.obstacles) {
+    const limitX = r.panelWidth / 2 + o.width / 2 + r.obstacleClearance - eps;
+    const limitZ = r.panelHeight / 2 + o.depth / 2 + r.obstacleClearance - eps;
+    if (Math.abs(pos.x - o.x) < limitX && Math.abs(pos.z - o.z) < limitZ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function isValidPlacement(pos: Pos, others: Pos[], r: PlacementRules): boolean {
   const { minX, maxX, minZ, maxZ } = getBounds(r);
   if (minX > maxX || minZ > maxZ) return false;
+  if (hitsObstacle(pos, r)) return false;
 
   const eps = 1e-6;
   for (const o of others) {

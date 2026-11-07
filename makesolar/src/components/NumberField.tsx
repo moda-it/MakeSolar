@@ -26,6 +26,14 @@ function NumberField({
     setText(String(value));
   }, [value]);
 
+  useEffect(() => {
+    const parsed = Number(text);
+    if (text.trim() === "" || Number.isNaN(parsed)) return;
+    if (parsed < min || parsed > max || parsed === value) return;
+    const timer = setTimeout(() => onChange(parsed), 400);
+    return () => clearTimeout(timer);
+  }, [text, value, min, max, onChange]);
+
   function commit() {
     const parsed = Number(text);
     if (text.trim() === "" || Number.isNaN(parsed)) {
@@ -34,7 +42,7 @@ function NumberField({
     }
     const result = clamp(parsed, min, max);
     setText(String(result));
-    onChange(result);
+    if (result !== value) onChange(result);
   }
 
   return (

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import * as THREE from "three";
+import type { ThreeEvent } from "@react-three/fiber";
 import {
   buildBlockOutline,
   DEFAULT_BLOCK_PROFILE,
@@ -8,9 +9,11 @@ import {
 interface MountBlockProps {
   length: number;
   position: [number, number, number];
+  selected?: boolean;
+  onSelect?: () => void;
 }
 
-function MountBlock({ length, position }: MountBlockProps) {
+function MountBlock({ length, position, selected = false, onSelect }: MountBlockProps) {
   const geometry = useMemo(() => {
     const outline = buildBlockOutline(DEFAULT_BLOCK_PROFILE);
 
@@ -28,9 +31,20 @@ function MountBlock({ length, position }: MountBlockProps) {
     return extruded;
   }, [length]);
 
+  function handleClick(e: ThreeEvent<MouseEvent>) {
+    if (e.delta > 5) return;
+    e.stopPropagation();
+    onSelect?.();
+  }
+
   return (
-    <mesh geometry={geometry} position={position} rotation={[0, Math.PI / 2, 0]}>
-      <meshStandardMaterial color="silver" />
+    <mesh
+      geometry={geometry}
+      position={position}
+      rotation={[0, Math.PI / 2, 0]}
+      onClick={onSelect ? handleClick : undefined}
+    >
+      <meshStandardMaterial color={selected ? "#e67e22" : "silver"} />
     </mesh>
   );
 }

@@ -6,7 +6,9 @@ import {
   isValidPlacement,
   type Pos,
   type PlacementRules,
+  type Rect,
 } from "../geometry/placement";
+import RulerLayer from "./RulerLayer";
 
 interface PlacementLayerProps {
   panel: PanelParams;
@@ -24,6 +26,16 @@ interface Ghost {
 function PlacementLayer({ panel, others, rules, panelY, onPlace }: PlacementLayerProps) {
   const groupRef = useRef<THREE.Group>(null);
   const [ghost, setGhost] = useState<Ghost | null>(null);
+
+  const rulerOthers: Rect[] = [
+    ...others.map((o) => ({
+      x: o.x,
+      z: o.z,
+      width: rules.panelWidth,
+      depth: rules.panelHeight,
+    })),
+    ...rules.obstacles,
+  ];
 
   function toGhost(worldPoint: THREE.Vector3): Ghost | null {
     const group = groupRef.current;
@@ -55,17 +67,28 @@ function PlacementLayer({ panel, others, rules, panelY, onPlace }: PlacementLaye
       </mesh>
 
       {ghost && (
-        <mesh
-          position={[ghost.pos.x, panelY, ghost.pos.z]}
-          raycast={() => null}
-        >
-          <boxGeometry args={[panel.width, panel.thickness, panel.height]} />
-          <meshStandardMaterial
-            color={ghost.valid ? "#2ecc71" : "#e74c3c"}
-            transparent
-            opacity={0.6}
+        <>
+          <mesh position={[ghost.pos.x, panelY, ghost.pos.z]} raycast={() => null}>
+            <boxGeometry args={[panel.width, panel.thickness, panel.height]} />
+            <meshStandardMaterial
+              color={ghost.valid ? "#2ecc71" : "#e74c3c"}
+              transparent
+              opacity={0.6}
+            />
+          </mesh>
+          <RulerLayer
+            target={{
+              x: ghost.pos.x,
+              z: ghost.pos.z,
+              width: panel.width,
+              depth: panel.height,
+            }}
+            others={rulerOthers}
+            roofWidth={rules.roofWidth}
+            roofLength={rules.roofLength}
+            y={panelY + panel.thickness / 2 + 0.04}
           />
-        </mesh>
+        </>
       )}
     </group>
   );

@@ -19,6 +19,13 @@ export const DEFAULT_PROFILE: ProfileParams = {
   thickness: 0.01,
 };
 
+export const PROFILE_MIN_VALLEY = 0.03; // мінімальна довжина долинки, м
+
+// Висота верхівок ребер над площиною даху: від неї стартують блоки й перешкоди
+export function profileTopY(profile: ProfileParams): number {
+  return profile.thickness + profile.height;
+}
+
 export function buildProfileOutline(
   totalWidth: number,
   profile: ProfileParams

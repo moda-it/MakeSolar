@@ -17,3 +17,9 @@ export interface PlacedPanel {
   x: number;  // центр, локальні координати даху, м
   z: number;
 }
+
+export interface DragState {
+  id: number;
+  grab: { x: number; z: number };  // де курсор схопив панель
+  start: { x: number; z: number }; // де панель стояла до перетягування
+}
