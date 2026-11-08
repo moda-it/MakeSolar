@@ -12,13 +12,19 @@ export interface Rect {
   depth: number;
 }
 
+export interface Margins {
+  side: number;  // по боках, м
+  ridge: number; // біля коника, м
+  eave: number;  // біля карниза, м
+}
+
 export interface PlacementRules {
   roofWidth: number;
   roofLength: number;
   panelWidth: number;
   panelHeight: number;
   gap: number;
-  margin: number;
+  margins: Margins;
   snapDistance: number;
   obstacles: Rect[];
   obstacleClearance: number;
@@ -26,10 +32,10 @@ export interface PlacementRules {
 
 function getBounds(r: PlacementRules) {
   return {
-    minX: -r.roofWidth / 2 + r.margin + r.panelWidth / 2,
-    maxX: r.roofWidth / 2 - r.margin - r.panelWidth / 2,
-    minZ: -r.roofLength + r.margin + r.panelHeight / 2,
-    maxZ: -r.margin - r.panelHeight / 2,
+    minX: -r.roofWidth / 2 + r.margins.side + r.panelWidth / 2,
+    maxX: r.roofWidth / 2 - r.margins.side - r.panelWidth / 2,
+    minZ: -r.roofLength + r.margins.ridge + r.panelHeight / 2,
+    maxZ: -r.margins.eave - r.panelHeight / 2,
   };
 }
 

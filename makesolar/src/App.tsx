@@ -25,14 +25,16 @@ import {
 import {
   hitsObstacle,
   isInsideRoof,
+  type Margins,
   type PlacementRules,
   type Pos,
 } from "./geometry/placement";
+import { compassName } from "./geometry/compass";
+import { computeSunState, formatHour } from "./solar/sunPosition";
 import { clamp } from "./utils/math";
 
 type PanelMode = "auto" | "manual";
 
-const EDGE_MARGIN = 0.3;          // відступ від країв даху, м
 const MERGE_DISTANCE = 0.06;      // край-до-краю, щоб блок став спільним, м
 const SNAP_DISTANCE = 0.08;       // радіус дії магніту, м
 const OBSTACLE_CLEARANCE = 0.3;   // зона безпеки навколо перешкоди, м
@@ -54,12 +56,20 @@ function App() {
   const [roofWidth, setRoofWidth] = useState(10);
   const [roofLength, setRoofLength] = useState(6);
   const [tilt, setTilt] = useState(30);
+  const [azimuth, setAzimuth] = useState(180);
   const [layer, setLayer] = useState<LayerMode>("all");
   const [profile, setProfile] = useState<ProfileParams>(DEFAULT_PROFILE);
+
+  const [latitude, setLatitude] = useState(50);
+  const [dateIso, setDateIso] = useState("2026-06-21");
+  const [solarHour, setSolarHour] = useState(12);
 
   const [panelParams, setPanelParams] = useState<PanelParams>(PANEL_PRESETS[0].params);
   const [presetId, setPresetId] = useState(PANEL_PRESETS[0].id);
   const [gapCm, setGapCm] = useState(2.5);
+  const [sideCm, setSideCm] = useState(30);
+  const [ridgeCm, setRidgeCm] = useState(30);
+  const [eaveCm, setEaveCm] = useState(30);
   const [blockLength, setBlockLength] = useState<number>(0.3);
 
   const [mode, setMode] = useState<PanelMode>("auto");
@@ -78,7 +88,18 @@ function App() {
   const nextObstacleId = useRef(1);
 
   const panelGap = gapCm / 100;
-  const roof: RoofParams = { width: roofWidth, length: roofLength, tilt };
+  const roof: RoofParams = { width: roofWidth, length: roofLength, tilt, azimuth };
+
+  const sun = useMemo(
+    () => computeSunState(latitude, dateIso, solarHour),
+    [latitude, dateIso, solarHour]
+  );
+  const dl = sun.daylight;
+
+  const margins = useMemo<Margins>(
+    () => ({ side: sideCm / 100, ridge: ridgeCm / 100, eave: eaveCm / 100 }),
+    [sideCm, ridgeCm, eaveCm]
+  );
 
   const rules = useMemo<PlacementRules>(
     () => ({
@@ -87,12 +108,12 @@ function App() {
       panelWidth: panelParams.width,
       panelHeight: panelParams.height,
       gap: panelGap,
-      margin: EDGE_MARGIN,
+      margins,
       snapDistance: SNAP_DISTANCE,
       obstacles,
       obstacleClearance: OBSTACLE_CLEARANCE,
     }),
-    [roofWidth, roofLength, panelParams.width, panelParams.height, panelGap, obstacles]
+    [roofWidth, roofLength, panelParams.width, panelParams.height, panelGap, margins, obstacles]
   );
 
   const autoPanels = useMemo<PlacedPanel[]>(() => {
@@ -102,7 +123,7 @@ function App() {
       panelWidth: rules.panelWidth,
       panelHeight: rules.panelHeight,
       gap: rules.gap,
-      margin: rules.margin,
+      margins: rules.margins,
     });
     return result.placements
       .filter((p) => !hitsObstacle(p, rules))
@@ -158,14 +179,20 @@ function App() {
         setSelectedObstacleId(null);
         setSelectedBlock(null);
       }
-      if ((e.key === "Delete" || e.key === "Backspace") && selected !== null) {
-        setManualPanels((prev) => prev.filter((p) => p.id !== selected));
-        setSelectedId(null);
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selected !== null) {
+          setManualPanels((prev) => prev.filter((p) => p.id !== selected));
+          setSelectedId(null);
+        } else if (selectedObstacleId !== null) {
+          applyObstacles(obstacles.filter((o) => o.id !== selectedObstacleId));
+          setSelectedObstacleId(null);
+        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected]);
+  }, [selected, selectedObstacleId, obstacles, rules]);
 
   function resetPanels() {
     setMode("auto");
@@ -192,6 +219,11 @@ function App() {
 
   function changeGap(value: number) {
     setGapCm(value);
+    resetPanels();
+  }
+
+  function changeMargin(setter: (v: number) => void, value: number) {
+    setter(value);
     resetPanels();
   }
 
@@ -349,6 +381,63 @@ function App() {
           <NumberField label="Ширина" unit="м" value={roofWidth} min={2} max={20} onChange={(v) => changeRoofSize(v, roofLength)} />
           <NumberField label="Довжина схилу" unit="м" value={roofLength} min={2} max={10} onChange={(v) => changeRoofSize(roofWidth, v)} />
           <NumberField label="Нахил" unit="°" value={tilt} min={0} max={90} step={1} onChange={setTilt} />
+          <NumberField label="Орієнтація скату (азимут)" unit="°" value={azimuth} min={0} max={360} step={5} onChange={setAzimuth} />
+          <div style={{ marginBottom: 8 }}>
+            <button onClick={() => setAzimuth(0)}>Пн</button>{" "}
+            <button onClick={() => setAzimuth(90)}>Сх</button>{" "}
+            <button onClick={() => setAzimuth(180)}>Пд</button>{" "}
+            <button onClick={() => setAzimuth(270)}>Зх</button>
+          </div>
+          <p style={{ fontSize: 13 }}>
+            Скат дивиться на: <b>{compassName(azimuth)}</b> (бік карниза)
+          </p>
+
+          <h3>Сонце</h3>
+          <NumberField label="Широта" unit="°" value={latitude} min={-85} max={85} step={0.5} onChange={setLatitude} />
+          <label style={{ display: "block", marginBottom: 8 }}>
+            Дата:{" "}
+            <input
+              type="date"
+              value={dateIso}
+              onChange={(e) => {
+                if (e.target.value) setDateIso(e.target.value);
+              }}
+            />
+          </label>
+          <label style={{ display: "block", marginBottom: 8 }}>
+            Сонячний час: <b>{formatHour(solarHour)}</b>
+            <input
+              type="range"
+              min={0}
+              max={24}
+              step={0.05}
+              value={solarHour}
+              onChange={(e) => setSolarHour(Number(e.target.value))}
+              style={{ width: "100%" }}
+            />
+          </label>
+          <p style={{ fontSize: 13 }}>
+            Висота Сонця: <b>{sun.elevationDeg.toFixed(1)}°</b>
+            <br />
+            Азимут: <b>{sun.azimuthDeg.toFixed(1)}°</b> ({compassName(sun.azimuthDeg)})
+            <br />
+            {dl.sunrise !== null && dl.sunset !== null ? (
+              <>
+                Схід ≈ {formatHour(dl.sunrise)}, захід ≈ {formatHour(dl.sunset)}
+                <br />
+                День триває {formatHour(dl.sunset - dl.sunrise)}
+              </>
+            ) : dl.polar === "night" ? (
+              <>Полярна ніч: Сонце не сходить</>
+            ) : (
+              <>Полярний день: Сонце не заходить</>
+            )}
+          </p>
+
+          <h3>Відступи панелей від країв</h3>
+          <NumberField label="Біля карниза" unit="см" value={eaveCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setEaveCm, v)} />
+          <NumberField label="Біля коника" unit="см" value={ridgeCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setRidgeCm, v)} />
+          <NumberField label="По боках" unit="см" value={sideCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setSideCm, v)} />
 
           <h3>Профіль листа</h3>
           <NumberField label="Крок хвилі" unit="мм" value={toMm(profile.pitch)} min={pitchMinMm} max={400} step={1} onChange={(v) => setProfile({ ...profile, pitch: v / 1000 })} />
@@ -369,7 +458,7 @@ function App() {
                 Видалити перешкоду
               </button>
               <p style={{ fontSize: 13 }}>
-                Затисни вибрану перешкоду й тягни мишею. Лінії показують відстані: блакитні до країв даху, жовті до сусідніх об'єктів.
+                Затисни вибрану перешкоду й тягни мишею. Лінії показують відстані: блакитні до країв даху, жовті до сусідніх об'єктів. Delete видаляє.
               </p>
             </div>
           )}
@@ -457,6 +546,7 @@ function App() {
           <SolarScene
             roof={roof}
             profile={profile}
+            sun={sun}
             panel={panelParams}
             panels={panels}
             blocks={blocks}

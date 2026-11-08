@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import Roof from "./roof";
@@ -8,6 +9,8 @@ import PlacementLayer from "./PlacementLayer";
 import DragLayer from "./DragLayer";
 import ObstacleDragLayer from "./ObstacleDragLayer";
 import RulerLayer from "./RulerLayer";
+import Compass from "./Compass";
+import Sun from "./Sun";
 import type { RoofParams } from "../types/roof";
 import type { PanelParams, PlacedPanel, DragState } from "../types/panel";
 import type { Obstacle, ObstacleDragState } from "../types/obstacle";
@@ -16,10 +19,13 @@ import type { BlockPlacement } from "../geometry/blockLayout";
 import type { Pos, PlacementRules, Rect } from "../geometry/placement";
 import { profileTopY, type ProfileParams } from "../geometry/roofProfile";
 import { DEFAULT_BLOCK_PROFILE } from "../geometry/blockProfile";
+import { azimuthToRotationY } from "../geometry/compass";
+import type { SunState } from "../solar/sunPosition";
 
 interface SolarSceneProps {
   roof: RoofParams;
   profile: ProfileParams;
+  sun: SunState;
   panel: PanelParams;
   panels: PlacedPanel[];
   blocks: BlockPlacement[];
@@ -46,9 +52,13 @@ interface SolarSceneProps {
   onSelectBlock: (b: Pos) => void;
 }
 
+const NIGHT = new THREE.Color("#0b1026");
+const DAY = new THREE.Color("#cfe8ff");
+
 function SolarScene({
   roof,
   profile,
+  sun,
   panel,
   panels,
   blocks,
@@ -77,6 +87,18 @@ function SolarScene({
   const blockY = profileTopY(profile);
   const panelY = blockY + DEFAULT_BLOCK_PROFILE.height + panel.thickness / 2;
   const rulerY = panelY + panel.thickness / 2 + 0.04;
+
+  const tiltRad = THREE.MathUtils.degToRad(roof.tilt);
+  const horizontalLength = roof.length * Math.cos(tiltRad);
+  const roofRotationY = azimuthToRotationY(roof.azimuth);
+
+  const daylightFactor = Math.max(0, sun.direction.y);
+  const background = NIGHT.clone().lerp(DAY, Math.min(1, daylightFactor * 3));
+  const lightPosition: [number, number, number] = [
+    sun.direction.x * 20,
+    sun.direction.y * 20,
+    sun.direction.z * 20,
+  ];
 
   const showPanels = layer === "all";
   const idle = !placing && !drag && !obstacleDrag;
@@ -121,141 +143,152 @@ function SolarScene({
     idle && layer !== "roof" ? blocks.find(isSelectedBlock) : undefined;
 
   return (
-    <Canvas camera={{ position: [10, 10, 10] }} onPointerMissed={onDeselect}>
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 10, 5]} />
+    <Canvas camera={{ position: [14, 12, 14] }} onPointerMissed={onDeselect}>
+      <color attach="background" args={[background.getHex()]} />
+      <ambientLight intensity={0.15 + 0.35 * daylightFactor} />
+      <directionalLight position={lightPosition} intensity={2.2 * daylightFactor} />
 
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[20, 20]} />
+        <planeGeometry args={[40, 40]} />
         <meshStandardMaterial color="lightgray" />
       </mesh>
 
-      <gridHelper args={[20, 20]} />
+      <gridHelper args={[40, 40]} />
       <axesHelper args={[3]} />
+      <Compass />
+      <Sun
+        direction={sun.direction}
+        elevationDeg={sun.elevationDeg}
+        path={sun.path}
+      />
 
-      <Roof params={roof} profile={profile}>
-        {visibleObstacles.map((o) => (
-          <ObstacleBox
-            key={o.id}
-            obstacle={o}
-            baseY={blockY}
-            selected={o.id === selectedObstacleId}
-            onSelect={placing || drag || obstacleDrag ? undefined : () => onSelectObstacle(o.id)}
-            onDragStart={
-              placing || drag || obstacleDrag
-                ? undefined
-                : (grab) => onObstacleDragStart(o.id, grab)
-            }
-          />
-        ))}
+      <group rotation={[0, roofRotationY, 0]}>
+        <group position={[0, 0, horizontalLength / 2]}>
+          <Roof params={roof} profile={profile}>
+            {visibleObstacles.map((o) => (
+              <ObstacleBox
+                key={o.id}
+                obstacle={o}
+                baseY={blockY}
+                selected={o.id === selectedObstacleId}
+                onSelect={placing || drag || obstacleDrag ? undefined : () => onSelectObstacle(o.id)}
+                onDragStart={
+                  placing || drag || obstacleDrag
+                    ? undefined
+                    : (grab) => onObstacleDragStart(o.id, grab)
+                }
+              />
+            ))}
 
-        {layer !== "roof" &&
-          blocks.map((b, i) => (
-            <MountBlock
-              key={i}
-              length={blockLength}
-              position={[b.x, blockY, b.z]}
-              selected={isSelectedBlock(b)}
-              onSelect={idle ? () => onSelectBlock({ x: b.x, z: b.z }) : undefined}
-            />
-          ))}
+            {layer !== "roof" &&
+              blocks.map((b, i) => (
+                <MountBlock
+                  key={i}
+                  length={blockLength}
+                  position={[b.x, blockY, b.z]}
+                  selected={isSelectedBlock(b)}
+                  onSelect={idle ? () => onSelectBlock({ x: b.x, z: b.z }) : undefined}
+                />
+              ))}
 
-        {showPanels &&
-          visiblePanels.map((p) => (
-            <SolarPanel
-              key={p.id}
-              params={panel}
-              position={[p.x, panelY, p.z]}
-              selected={p.id === selectedId}
-              onSelect={placing || obstacleDrag ? undefined : () => onSelect(p.id)}
-              onDragStart={
-                placing || obstacleDrag ? undefined : (grab) => onDragStart(p.id, grab)
-              }
-            />
-          ))}
+            {showPanels &&
+              visiblePanels.map((p) => (
+                <SolarPanel
+                  key={p.id}
+                  params={panel}
+                  position={[p.x, panelY, p.z]}
+                  selected={p.id === selectedId}
+                  onSelect={placing || obstacleDrag ? undefined : () => onSelect(p.id)}
+                  onDragStart={
+                    placing || obstacleDrag ? undefined : (grab) => onDragStart(p.id, grab)
+                  }
+                />
+              ))}
 
-        {placing && showPanels && (
-          <PlacementLayer
-            panel={panel}
-            others={panels}
-            rules={rules}
-            panelY={panelY}
-            onPlace={onPlace}
-          />
-        )}
+            {placing && showPanels && (
+              <PlacementLayer
+                panel={panel}
+                others={panels}
+                rules={rules}
+                panelY={panelY}
+                onPlace={onPlace}
+              />
+            )}
 
-        {drag && showPanels && (
-          <DragLayer
-            key={drag.id}
-            panel={panel}
-            others={visiblePanels}
-            rules={rules}
-            panelY={panelY}
-            start={drag.start}
-            grab={drag.grab}
-            onDrop={onDrop}
-            onCancel={onCancelDrag}
-          />
-        )}
+            {drag && showPanels && (
+              <DragLayer
+                key={drag.id}
+                panel={panel}
+                others={visiblePanels}
+                rules={rules}
+                panelY={panelY}
+                start={drag.start}
+                grab={drag.grab}
+                onDrop={onDrop}
+                onCancel={onCancelDrag}
+              />
+            )}
 
-        {obstacleDrag && draggedObstacle && (
-          <ObstacleDragLayer
-            key={obstacleDrag.id}
-            obstacle={draggedObstacle}
-            panelRects={showPanels ? panels.map(toPanelRect) : []}
-            otherObstacles={visibleObstacles.map(toObstacleRect)}
-            roofWidth={roof.width}
-            roofLength={roof.length}
-            snapDistance={rules.snapDistance}
-            baseY={blockY}
-            rulerY={rulerY}
-            grab={obstacleDrag.grab}
-            onDrop={onObstacleDrop}
-            onCancel={onObstacleCancelDrag}
-          />
-        )}
+            {obstacleDrag && draggedObstacle && (
+              <ObstacleDragLayer
+                key={obstacleDrag.id}
+                obstacle={draggedObstacle}
+                panelRects={showPanels ? panels.map(toPanelRect) : []}
+                otherObstacles={visibleObstacles.map(toObstacleRect)}
+                roofWidth={roof.width}
+                roofLength={roof.length}
+                snapDistance={rules.snapDistance}
+                baseY={blockY}
+                rulerY={rulerY}
+                grab={obstacleDrag.grab}
+                onDrop={onObstacleDrop}
+                onCancel={onObstacleCancelDrag}
+              />
+            )}
 
-        {selectedPanel && (
-          <RulerLayer
-            target={toPanelRect(selectedPanel)}
-            others={[
-              ...panels.filter((p) => p.id !== selectedPanel.id).map(toPanelRect),
-              ...obstacles.map(toObstacleRect),
-            ]}
-            roofWidth={roof.width}
-            roofLength={roof.length}
-            y={rulerY}
-          />
-        )}
+            {selectedPanel && (
+              <RulerLayer
+                target={toPanelRect(selectedPanel)}
+                others={[
+                  ...panels.filter((p) => p.id !== selectedPanel.id).map(toPanelRect),
+                  ...obstacles.map(toObstacleRect),
+                ]}
+                roofWidth={roof.width}
+                roofLength={roof.length}
+                y={rulerY}
+              />
+            )}
 
-        {selectedObstacle && (
-          <RulerLayer
-            target={toObstacleRect(selectedObstacle)}
-            others={[
-              ...(showPanels ? panels.map(toPanelRect) : []),
-              ...obstacles
-                .filter((o) => o.id !== selectedObstacle.id)
-                .map(toObstacleRect),
-            ]}
-            roofWidth={roof.width}
-            roofLength={roof.length}
-            y={rulerY}
-          />
-        )}
+            {selectedObstacle && (
+              <RulerLayer
+                target={toObstacleRect(selectedObstacle)}
+                others={[
+                  ...(showPanels ? panels.map(toPanelRect) : []),
+                  ...obstacles
+                    .filter((o) => o.id !== selectedObstacle.id)
+                    .map(toObstacleRect),
+                ]}
+                roofWidth={roof.width}
+                roofLength={roof.length}
+                y={rulerY}
+              />
+            )}
 
-        {activeBlock && (
-          <RulerLayer
-            target={blockRect(activeBlock)}
-            others={[
-              ...blocks.filter((b) => b !== activeBlock).map(blockRect),
-              ...obstacles.map(toObstacleRect),
-            ]}
-            roofWidth={roof.width}
-            roofLength={roof.length}
-            y={rulerY}
-          />
-        )}
-      </Roof>
+            {activeBlock && (
+              <RulerLayer
+                target={blockRect(activeBlock)}
+                others={[
+                  ...blocks.filter((b) => b !== activeBlock).map(blockRect),
+                  ...obstacles.map(toObstacleRect),
+                ]}
+                roofWidth={roof.width}
+                roofLength={roof.length}
+                y={rulerY}
+              />
+            )}
+          </Roof>
+        </group>
+      </group>
 
       <OrbitControls enabled={!drag && !obstacleDrag} />
     </Canvas>
