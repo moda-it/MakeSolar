@@ -50,7 +50,10 @@ interface SolarSceneProps {
   onObstacleCancelDrag: () => void;
   selectedBlock: Pos | null;
   onSelectBlock: (b: Pos) => void;
+  panelShade?: Map<number, number>; // частка втрат від тіні для підсвічування, 0..1
 }
+
+const SHADOW_EXTENT = 16; // половина розміру області, де рахуються тіні, м
 
 const NIGHT = new THREE.Color("#0b1026");
 const DAY = new THREE.Color("#cfe8ff");
@@ -83,6 +86,7 @@ function SolarScene({
   onObstacleCancelDrag,
   selectedBlock,
   onSelectBlock,
+  panelShade,
 }: SolarSceneProps) {
   const blockY = profileTopY(profile);
   const panelY = blockY + DEFAULT_BLOCK_PROFILE.height + panel.thickness / 2;
@@ -143,12 +147,30 @@ function SolarScene({
     idle && layer !== "roof" ? blocks.find(isSelectedBlock) : undefined;
 
   return (
-    <Canvas camera={{ position: [14, 12, 14] }} onPointerMissed={onDeselect}>
+    <Canvas
+      shadows
+      camera={{ position: [14, 12, 14] }}
+      gl={{ preserveDrawingBuffer: true }}
+      onPointerMissed={onDeselect}
+    >
       <color attach="background" args={[background.getHex()]} />
       <ambientLight intensity={0.15 + 0.35 * daylightFactor} />
-      <directionalLight position={lightPosition} intensity={2.2 * daylightFactor} />
+      <directionalLight
+        position={lightPosition}
+        intensity={2.2 * daylightFactor}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0005}
+        shadow-normalBias={0.02}
+        shadow-camera-left={-SHADOW_EXTENT}
+        shadow-camera-right={SHADOW_EXTENT}
+        shadow-camera-top={SHADOW_EXTENT}
+        shadow-camera-bottom={-SHADOW_EXTENT}
+        shadow-camera-near={0.5}
+        shadow-camera-far={50}
+      />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[40, 40]} />
         <meshStandardMaterial color="lightgray" />
       </mesh>
@@ -198,6 +220,7 @@ function SolarScene({
                   params={panel}
                   position={[p.x, panelY, p.z]}
                   selected={p.id === selectedId}
+                  shade={panelShade?.get(p.id)}
                   onSelect={placing || obstacleDrag ? undefined : () => onSelect(p.id)}
                   onDragStart={
                     placing || obstacleDrag ? undefined : (grab) => onDragStart(p.id, grab)

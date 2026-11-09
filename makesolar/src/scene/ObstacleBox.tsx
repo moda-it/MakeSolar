@@ -29,6 +29,8 @@ function ObstacleBox({ obstacle, baseY, selected, onSelect, onDragStart }: Obsta
       position={[obstacle.x, baseY + obstacle.height / 2, obstacle.z]}
       onClick={onSelect ? handleClick : undefined}
       onPointerDown={selected && onDragStart ? handlePointerDown : undefined}
+      castShadow
+      receiveShadow
     >
       <boxGeometry args={[obstacle.width, obstacle.height, obstacle.depth]} />
       <meshStandardMaterial color={selected ? "#e67e22" : "#8d6e63"} />

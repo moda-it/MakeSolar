@@ -45,23 +45,31 @@ function NumberField({
     if (result !== value) onChange(result);
   }
 
+  const parsed = Number(text);
+  const invalid =
+    text.trim() !== "" && (Number.isNaN(parsed) || parsed < min || parsed > max);
+
   return (
-    <label style={{ display: "block", marginBottom: 8 }}>
-      {label}
-      {unit ? ` (${unit})` : ""}:{" "}
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-        }}
-        style={{ width: 80 }}
-      />
+    <label className="field" title={`${min} – ${max}${unit ? " " + unit : ""}`}>
+      <span className="field-label">{label}</span>
+      <span className="field-control" data-invalid={invalid || undefined}>
+        <input
+          className="field-input"
+          type="number"
+          inputMode="decimal"
+          min={min}
+          max={max}
+          step={step}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onFocus={(e) => e.target.select()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+          }}
+        />
+        {unit && <span className="field-unit">{unit}</span>}
+      </span>
     </label>
   );
 }

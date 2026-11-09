@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import SolarScene from "./scene/SolarScene";
 import NumberField from "./components/NumberField";
+import Segmented from "./components/Segmented";
+import Icon from "./components/Icon";
 import type { RoofParams } from "./types/roof";
 import type { LayerMode } from "./types/layers";
 import type { Obstacle, ObstacleDragState } from "./types/obstacle";
@@ -30,10 +32,38 @@ import {
   type Pos,
 } from "./geometry/placement";
 import { compassName } from "./geometry/compass";
-import { computeSunState, formatHour } from "./solar/sunPosition";
+import { computeSunState, dayOfYear, formatHour } from "./solar/sunPosition";
+import { profileTopY } from "./geometry/roofProfile";
+import { DEFAULT_BLOCK_PROFILE } from "./geometry/blockProfile";
+import { simulateDay, simulateYear, type EnergyInput } from "./solar/energy";
+import {
+  DEFAULT_PRICES,
+  buildEstimate,
+  computePayback,
+  type Prices,
+} from "./economics/estimate";
+import {
+  PROJECT_VERSION,
+  downloadProject,
+  loadAutosave,
+  readProjectFile,
+  saveAutosave,
+  type ProjectData,
+} from "./project/storage";
+import { DayChart, MonthChart, PaybackChart } from "./components/charts";
+import { formatNumber } from "./utils/format";
+import Report from "./components/Report";
 import { clamp } from "./utils/math";
 
 type PanelMode = "auto" | "manual";
+type Tab = "roof" | "panels" | "sun" | "obstacles";
+type ResultsTab = "energy" | "cost";
+
+// Проєкт, збережений у браузері минулого разу
+const SAVED = loadAutosave();
+const NARROW_SCREEN = typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches;
+const maxId = (items: { id: number }[], fallback: number) =>
+  items.reduce((m, i) => Math.max(m, i.id + 1), fallback);
 
 const MERGE_DISTANCE = 0.06;      // край-до-краю, щоб блок став спільним, м
 const SNAP_DISTANCE = 0.08;       // радіус дії магніту, м
@@ -53,39 +83,52 @@ function fitObstacle(o: Obstacle, width: number, length: number): Obstacle {
 }
 
 function App() {
-  const [roofWidth, setRoofWidth] = useState(10);
-  const [roofLength, setRoofLength] = useState(6);
-  const [tilt, setTilt] = useState(30);
-  const [azimuth, setAzimuth] = useState(180);
+  const [roofWidth, setRoofWidth] = useState(SAVED?.roof.width ?? 10);
+  const [roofLength, setRoofLength] = useState(SAVED?.roof.length ?? 6);
+  const [tilt, setTilt] = useState(SAVED?.roof.tilt ?? 30);
+  const [azimuth, setAzimuth] = useState(SAVED?.roof.azimuth ?? 180);
   const [layer, setLayer] = useState<LayerMode>("all");
-  const [profile, setProfile] = useState<ProfileParams>(DEFAULT_PROFILE);
+  const [tab, setTab] = useState<Tab>("roof");
+  const [profile, setProfile] = useState<ProfileParams>(SAVED?.profile ?? DEFAULT_PROFILE);
 
-  const [latitude, setLatitude] = useState(50);
-  const [dateIso, setDateIso] = useState("2026-06-21");
-  const [solarHour, setSolarHour] = useState(12);
+  const [latitude, setLatitude] = useState(SAVED?.sun.latitude ?? 50.25);
+  const [dateIso, setDateIso] = useState(SAVED?.sun.date ?? "2026-06-21");
+  const [solarHour, setSolarHour] = useState(SAVED?.sun.hour ?? 12);
 
-  const [panelParams, setPanelParams] = useState<PanelParams>(PANEL_PRESETS[0].params);
-  const [presetId, setPresetId] = useState(PANEL_PRESETS[0].id);
-  const [gapCm, setGapCm] = useState(2.5);
-  const [sideCm, setSideCm] = useState(30);
-  const [ridgeCm, setRidgeCm] = useState(30);
-  const [eaveCm, setEaveCm] = useState(30);
-  const [blockLength, setBlockLength] = useState<number>(0.3);
+  const [panelParams, setPanelParams] = useState<PanelParams>(SAVED?.panel.params ?? PANEL_PRESETS[0].params);
+  const [presetId, setPresetId] = useState(SAVED?.panel.presetId ?? PANEL_PRESETS[0].id);
+  const [gapCm, setGapCm] = useState(SAVED?.panel.gapCm ?? 2.5);
+  const [sideCm, setSideCm] = useState(SAVED?.margins.sideCm ?? 30);
+  const [ridgeCm, setRidgeCm] = useState(SAVED?.margins.ridgeCm ?? 30);
+  const [eaveCm, setEaveCm] = useState(SAVED?.margins.eaveCm ?? 30);
+  const [blockLength, setBlockLength] = useState<number>(SAVED?.blockLength ?? 0.3);
 
-  const [mode, setMode] = useState<PanelMode>("auto");
-  const [manualPanels, setManualPanels] = useState<PlacedPanel[]>([]);
+  const [mode, setMode] = useState<PanelMode>(SAVED?.mode ?? "auto");
+  const [manualPanels, setManualPanels] = useState<PlacedPanel[]>(SAVED?.manualPanels ?? []);
   const [placing, setPlacing] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
-  const [obstacles, setObstacles] = useState<Obstacle[]>([]);
+  const [obstacles, setObstacles] = useState<Obstacle[]>(SAVED?.obstacles ?? []);
   const [selectedObstacleId, setSelectedObstacleId] = useState<number | null>(null);
   const [obstacleDrag, setObstacleDrag] = useState<ObstacleDragState | null>(null);
 
   const [selectedBlock, setSelectedBlock] = useState<Pos | null>(null);
 
-  const nextId = useRef(1000);
-  const nextObstacleId = useRef(1);
+  const [prices, setPrices] = useState<Prices>(SAVED?.prices ?? DEFAULT_PRICES);
+  // На вузькому екрані панелі стартують згорнутими, щоб було видно сцену
+  const [resultsOpen, setResultsOpen] = useState(!NARROW_SCREEN);
+  const [sidebarOpen, setSidebarOpen] = useState(!NARROW_SCREEN);
+  const [chromeHidden, setChromeHidden] = useState(false); // усі меню сховано
+  const [resultsTab, setResultsTab] = useState<ResultsTab>("energy");
+  const [showShade, setShowShade] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const [printJob, setPrintJob] = useState(0);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const nextId = useRef(maxId(SAVED?.manualPanels ?? [], 1000));
+  const nextObstacleId = useRef(maxId(SAVED?.obstacles ?? [], 1));
 
   const panelGap = gapCm / 100;
   const roof: RoofParams = { width: roofWidth, length: roofLength, tilt, azimuth };
@@ -168,10 +211,131 @@ function App() {
   const ribTopMaxMm = floorMm(profile.pitch - 2 * profile.ribSlope - PROFILE_MIN_VALLEY);
   const slopeMaxMm = floorMm((profile.pitch - profile.ribTop - PROFILE_MIN_VALLEY) / 2);
 
+  // ───────── Енергія, кошторис, окупність ─────────
+  const obstacleBaseY = profileTopY(profile);
+  const panelTopY = obstacleBaseY + DEFAULT_BLOCK_PROFILE.height + panelParams.thickness;
+
+  const energyInput = useMemo<EnergyInput>(
+    () => ({ latitude, tilt, azimuth, panel: panelParams, panels, panelTopY, obstacles, obstacleBaseY }),
+    [latitude, tilt, azimuth, panelParams, panels, panelTopY, obstacles, obstacleBaseY]
+  );
+  const day = dayOfYear(dateIso);
+  const daySim = useMemo(() => simulateDay(energyInput, day), [energyInput, day]);
+  const year = useMemo(() => simulateYear(energyInput), [energyInput]);
+  const shadeLoss = year.annualNoShadeKwh > 0 ? 1 - year.annualKwh / year.annualNoShadeKwh : 0;
+
+  const panelShade = useMemo(() => {
+    if (!showShade) return undefined;
+    return new Map(panels.map((p, i) => [p.id, daySim.panelLoss[i] ?? 0]));
+  }, [showShade, panels, daySim]);
+
+  const presetLabel =
+    PANEL_PRESETS.find((p) => p.id === presetId)?.label ??
+    `${Math.round(panelParams.width * 1000)}×${Math.round(panelParams.height * 1000)} мм, ${panelParams.power} Вт`;
+
+  const estimate = useMemo(
+    () => buildEstimate({ panelLabel: presetLabel, panelCount: panels.length, blockCount: blocks.length, prices }),
+    [presetLabel, panels.length, blocks.length, prices]
+  );
+  const payback = useMemo(
+    () => computePayback(estimate.total, year.annualKwh, prices.tariff),
+    [estimate.total, year.annualKwh, prices.tariff]
+  );
+
+  // ───────── Збереження проєкту ─────────
+  const project = useMemo<ProjectData>(
+    () => ({
+      version: PROJECT_VERSION,
+      roof: { width: roofWidth, length: roofLength, tilt, azimuth },
+      profile,
+      sun: { latitude, date: dateIso, hour: solarHour },
+      panel: { presetId, params: panelParams, gapCm },
+      margins: { sideCm, ridgeCm, eaveCm },
+      blockLength,
+      mode,
+      manualPanels,
+      obstacles,
+      prices,
+    }),
+    [roofWidth, roofLength, tilt, azimuth, profile, latitude, dateIso, solarHour, presetId, panelParams,
+      gapCm, sideCm, ridgeCm, eaveCm, blockLength, mode, manualPanels, obstacles, prices]
+  );
+
+  useEffect(() => {
+    const t = setTimeout(() => saveAutosave(project), 500);
+    return () => clearTimeout(t);
+  }, [project]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  useEffect(() => {
+    if (printJob === 0) return;
+    // друкуємо після того, як знімок сцени потрапив у звіт
+    const id = requestAnimationFrame(() => window.print());
+    return () => cancelAnimationFrame(id);
+  }, [printJob]);
+
+  function applyProject(p: ProjectData) {
+    setRoofWidth(p.roof.width);
+    setRoofLength(p.roof.length);
+    setTilt(p.roof.tilt);
+    setAzimuth(p.roof.azimuth);
+    setProfile(p.profile);
+    setLatitude(p.sun.latitude);
+    setDateIso(p.sun.date);
+    setSolarHour(p.sun.hour);
+    setPresetId(p.panel.presetId);
+    setPanelParams(p.panel.params);
+    setGapCm(p.panel.gapCm);
+    setSideCm(p.margins.sideCm);
+    setRidgeCm(p.margins.ridgeCm);
+    setEaveCm(p.margins.eaveCm);
+    setBlockLength(p.blockLength);
+    setMode(p.mode);
+    setManualPanels(p.manualPanels);
+    setObstacles(p.obstacles);
+    setPrices(p.prices);
+    nextId.current = maxId(p.manualPanels, 1000);
+    nextObstacleId.current = maxId(p.obstacles, 1);
+    setPlacing(false);
+    setDrag(null);
+    setObstacleDrag(null);
+    setSelectedId(null);
+    setSelectedObstacleId(null);
+    setSelectedBlock(null);
+  }
+
+  async function openProjectFile(file: File | undefined) {
+    if (!file) return;
+    const p = await readProjectFile(file);
+    if (p) {
+      applyProject(p);
+      setNotice(`Проєкт «${file.name}» відкрито`);
+    } else {
+      setNotice("Цей файл не схожий на проєкт MakeSolar");
+    }
+  }
+
+  function printReport() {
+    const canvas = document.querySelector<HTMLCanvasElement>(".stage canvas");
+    try {
+      setSnapshot(canvas ? canvas.toDataURL("image/png") : null);
+    } catch {
+      setSnapshot(null);
+    }
+    setPrintJob((n) => n + 1);
+  }
+
+  const updatePrice = (key: keyof Prices) => (v: number) => setPrices((p) => ({ ...p, [key]: v }));
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "SELECT") return;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
       if (e.key === "Escape") {
         setPlacing(false);
@@ -257,6 +421,7 @@ function App() {
       roofLength
     );
     applyObstacles([...obstacles, created]);
+    setTab("obstacles");
     setSelectedObstacleId(id);
     setSelectedId(null);
     setSelectedBlock(null);
@@ -277,6 +442,7 @@ function App() {
   }
 
   function selectObstacle(id: number) {
+    setTab("obstacles");
     setSelectedObstacleId(id);
     setSelectedId(null);
     setSelectedBlock(null);
@@ -372,206 +538,594 @@ function App() {
     setDrag(null);
   }
 
+  const hint = placing
+    ? "Клік по даху ставить панель: зелена означає можна, червона ні. Esc завершує."
+    : selected !== null
+      ? "Затисни панель і тягни, щоб перемістити. Delete видаляє, Esc знімає вибір."
+      : selectedObstacle
+        ? "Тягни перешкоду мишею. Блакитні лінії показують відстань до країв, жовті до сусідів."
+        : selectedBlock
+          ? "Блок виміряно. Esc знімає вибір."
+          : null;
+
+  const sunriseAt = dl.sunrise !== null ? (dl.sunrise / 24) * 100 : dl.polar === "day" ? 0 : 50;
+  const sunsetAt = dl.sunset !== null ? (dl.sunset / 24) * 100 : dl.polar === "day" ? 100 : 50;
+
   return (
-    <div className="app">
-      <h1>MakeSOLAR</h1>
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-        <div style={{ minWidth: 290 }}>
-          <h3>Дах</h3>
-          <NumberField label="Ширина" unit="м" value={roofWidth} min={2} max={20} onChange={(v) => changeRoofSize(v, roofLength)} />
-          <NumberField label="Довжина схилу" unit="м" value={roofLength} min={2} max={10} onChange={(v) => changeRoofSize(roofWidth, v)} />
-          <NumberField label="Нахил" unit="°" value={tilt} min={0} max={90} step={1} onChange={setTilt} />
-          <NumberField label="Орієнтація скату (азимут)" unit="°" value={azimuth} min={0} max={360} step={5} onChange={setAzimuth} />
-          <div style={{ marginBottom: 8 }}>
-            <button onClick={() => setAzimuth(0)}>Пн</button>{" "}
-            <button onClick={() => setAzimuth(90)}>Сх</button>{" "}
-            <button onClick={() => setAzimuth(180)}>Пд</button>{" "}
-            <button onClick={() => setAzimuth(270)}>Зх</button>
-          </div>
-          <p style={{ fontSize: 13 }}>
-            Скат дивиться на: <b>{compassName(azimuth)}</b> (бік карниза)
-          </p>
+    <div
+      className="app"
+      data-results={resultsOpen ? "open" : "closed"}
+      data-sidebar={sidebarOpen ? "open" : "closed"}
+      data-chrome={chromeHidden ? "hidden" : "shown"}
+    >
+      <div className="stage">
+        <SolarScene
+          roof={roof}
+          profile={profile}
+          sun={sun}
+          panel={panelParams}
+          panels={panels}
+          blocks={blocks}
+          blockLength={blockLength}
+          layer={layer}
+          placing={placing}
+          rules={rules}
+          onPlace={placePanel}
+          selectedId={selected}
+          onSelect={selectPanel}
+          onDeselect={deselectAll}
+          drag={drag}
+          onDragStart={startDrag}
+          onDrop={dropDrag}
+          onCancelDrag={cancelDrag}
+          obstacles={obstacles}
+          selectedObstacleId={selectedObstacleId}
+          onSelectObstacle={selectObstacle}
+          obstacleDrag={obstacleDrag}
+          onObstacleDragStart={startObstacleDrag}
+          onObstacleDrop={dropObstacle}
+          onObstacleCancelDrag={cancelObstacleDrag}
+          selectedBlock={selectedBlock}
+          onSelectBlock={selectBlock}
+          panelShade={panelShade}
+        />
+      </div>
 
-          <h3>Сонце</h3>
-          <NumberField label="Широта" unit="°" value={latitude} min={-85} max={85} step={0.5} onChange={setLatitude} />
-          <label style={{ display: "block", marginBottom: 8 }}>
-            Дата:{" "}
-            <input
-              type="date"
-              value={dateIso}
-              onChange={(e) => {
-                if (e.target.value) setDateIso(e.target.value);
-              }}
-            />
-          </label>
-          <label style={{ display: "block", marginBottom: 8 }}>
-            Сонячний час: <b>{formatHour(solarHour)}</b>
-            <input
-              type="range"
-              min={0}
-              max={24}
-              step={0.05}
-              value={solarHour}
-              onChange={(e) => setSolarHour(Number(e.target.value))}
-              style={{ width: "100%" }}
-            />
-          </label>
-          <p style={{ fontSize: 13 }}>
-            Висота Сонця: <b>{sun.elevationDeg.toFixed(1)}°</b>
-            <br />
-            Азимут: <b>{sun.azimuthDeg.toFixed(1)}°</b> ({compassName(sun.azimuthDeg)})
-            <br />
-            {dl.sunrise !== null && dl.sunset !== null ? (
-              <>
-                Схід ≈ {formatHour(dl.sunrise)}, захід ≈ {formatHour(dl.sunset)}
-                <br />
-                День триває {formatHour(dl.sunset - dl.sunrise)}
-              </>
-            ) : dl.polar === "night" ? (
-              <>Полярна ніч: Сонце не сходить</>
-            ) : (
-              <>Полярний день: Сонце не заходить</>
-            )}
-          </p>
-
-          <h3>Відступи панелей від країв</h3>
-          <NumberField label="Біля карниза" unit="см" value={eaveCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setEaveCm, v)} />
-          <NumberField label="Біля коника" unit="см" value={ridgeCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setRidgeCm, v)} />
-          <NumberField label="По боках" unit="см" value={sideCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setSideCm, v)} />
-
-          <h3>Профіль листа</h3>
-          <NumberField label="Крок хвилі" unit="мм" value={toMm(profile.pitch)} min={pitchMinMm} max={400} step={1} onChange={(v) => setProfile({ ...profile, pitch: v / 1000 })} />
-          <NumberField label="Висота ребра" unit="мм" value={toMm(profile.height)} min={5} max={60} step={1} onChange={(v) => setProfile({ ...profile, height: v / 1000 })} />
-          <NumberField label="Ширина верхівки" unit="мм" value={toMm(profile.ribTop)} min={10} max={Math.max(10, ribTopMaxMm)} step={1} onChange={(v) => setProfile({ ...profile, ribTop: v / 1000 })} />
-          <NumberField label="Розбіг скосу" unit="мм" value={toMm(profile.ribSlope)} min={5} max={Math.max(5, slopeMaxMm)} step={1} onChange={(v) => setProfile({ ...profile, ribSlope: v / 1000 })} />
-          <NumberField label="Товщина листа" unit="мм" value={toMm(profile.thickness)} min={2} max={30} step={1} onChange={(v) => setProfile({ ...profile, thickness: v / 1000 })} />
-          <button onClick={() => setProfile(DEFAULT_PROFILE)}>Стандартний профіль</button>
-
-          <h3>Перешкоди</h3>
-          <button onClick={addObstacle}>Додати перешкоду</button>
-          {selectedObstacle && (
-            <div style={{ marginTop: 8 }}>
-              <NumberField label="Ширина" unit="м" value={selectedObstacle.width} min={0.1} max={roofWidth} step={0.05} onChange={(v) => updateObstacle(selectedObstacle.id, { width: v })} />
-              <NumberField label="Глибина" unit="м" value={selectedObstacle.depth} min={0.1} max={roofLength} step={0.05} onChange={(v) => updateObstacle(selectedObstacle.id, { depth: v })} />
-              <NumberField label="Висота" unit="м" value={selectedObstacle.height} min={0.1} max={5} step={0.05} onChange={(v) => updateObstacle(selectedObstacle.id, { height: v })} />
-              <button onClick={() => deleteObstacle(selectedObstacle.id)}>
-                Видалити перешкоду
-              </button>
-              <p style={{ fontSize: 13 }}>
-                Затисни вибрану перешкоду й тягни мишею. Лінії показують відстані: блакитні до країв даху, жовті до сусідніх об'єктів. Delete видаляє.
-              </p>
+      <aside className="sidebar glass" data-open={sidebarOpen || undefined} inert={chromeHidden} aria-label="Параметри">
+        <header className="sidebar-head">
+          <div className="brand-row">
+            <div className="brand">
+              <span className="brand-mark" aria-hidden="true" />
+              Make<b>Solar</b>
             </div>
-          )}
-          <p style={{ fontSize: 13 }}>
-            Перешкод: {obstacles.length}. Панелі не ставляться ближче ніж на {Math.round(OBSTACLE_CLEARANCE * 100)} см до перешкоди.
-          </p>
-
-          <h3>Тип панелі</h3>
-          <select value={presetId} onChange={(e) => selectPreset(e.target.value)}>
-            <option value="custom">Власні розміри</option>
-            {PANEL_PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-          <div style={{ marginTop: 8 }}>
-            <NumberField label="Ширина (поперек хвилі)" unit="м" value={panelParams.width} min={0.3} max={3} step={0.01} onChange={(v) => changePanel({ ...panelParams, width: v }, "custom")} />
-            <NumberField label="Висота (уздовж хвилі)" unit="м" value={panelParams.height} min={0.3} max={3} step={0.01} onChange={(v) => changePanel({ ...panelParams, height: v }, "custom")} />
-            <NumberField label="Потужність" unit="Вт" value={panelParams.power} min={50} max={800} step={5} onChange={(v) => setPanelParams({ ...panelParams, power: v })} />
-            <NumberField label="Проміжок між панелями" unit="см" value={gapCm} min={1} max={10} step={0.5} onChange={changeGap} />
+            <div className="file-actions">
+              <button type="button" className="btn btn-icon btn-ghost" onClick={() => downloadProject(project)} title="Зберегти проєкт у файл" aria-label="Зберегти проєкт у файл">
+                <Icon name="download" />
+              </button>
+              <button type="button" className="btn btn-icon btn-ghost" onClick={() => fileInput.current?.click()} title="Відкрити проєкт з файлу" aria-label="Відкрити проєкт з файлу">
+                <Icon name="upload" />
+              </button>
+              <button type="button" className="btn btn-icon btn-ghost" onClick={printReport} title="Звіт PDF: друк або «Зберегти як PDF»" aria-label="Звіт PDF">
+                <Icon name="print" />
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => {
+                  void openProjectFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-icon btn-ghost"
+                onClick={() => setChromeHidden(true)}
+                title="Сховати всі меню"
+                aria-label="Сховати всі меню"
+              >
+                <Icon name="hide" />
+              </button>
+              <button
+                type="button"
+                className="btn btn-icon btn-ghost panel-toggle"
+                aria-expanded={sidebarOpen}
+                onClick={() => setSidebarOpen((o) => !o)}
+                title={sidebarOpen ? "Згорнути параметри" : "Показати параметри"}
+                aria-label={sidebarOpen ? "Згорнути параметри" : "Показати параметри"}
+              >
+                <Icon name="chevron" />
+              </button>
+            </div>
           </div>
-
-          <h3>Блок кріплення</h3>
-          <select value={blockLength} onChange={(e) => setBlockLength(Number(e.target.value))}>
-            {BLOCK_LENGTHS.map((l) => (
-              <option key={l} value={l}>
-                {Math.round(l * 100)} см
-              </option>
-            ))}
-          </select>
-          <p style={{ fontSize: 13 }}>
-            Щоб виміряти блок, увімкни шар «Дах + блочки» і клікни на нього.
-          </p>
-
-          <h3>Панелі на даху</h3>
-          <button onClick={fillAuto}>Максимум панелей</button>{" "}
-          <button onClick={clearPanels}>Очистити</button>
-          <div style={{ marginTop: 8 }}>
-            <button onClick={placing ? () => setPlacing(false) : startPlacing}>
-              {placing ? "Завершити додавання" : "Додати панель"}
-            </button>{" "}
-            <button onClick={undoLast} disabled={mode !== "manual" || manualPanels.length === 0}>
-              Скасувати останню
-            </button>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <button onClick={deleteSelected} disabled={selected === null}>
-              Видалити вибрану
-            </button>
-          </div>
-          {placing && (
-            <p style={{ fontSize: 13 }}>
-              Клік по даху ставить панель (зелена можна, червона ні). Esc виходить.
-            </p>
+          {sidebarOpen && (
+            <Segmented
+              label="Розділ"
+              value={tab}
+              onChange={setTab}
+              options={[
+                { value: "roof", label: "Дах" },
+                { value: "panels", label: "Панелі" },
+                { value: "sun", label: "Сонце" },
+                { value: "obstacles", label: "Перешкоди" },
+              ]}
+            />
           )}
-          {selected !== null && !placing && (
-            <p style={{ fontSize: 13 }}>
-              Панель вибрано: затисни її й тягни, щоб перемістити. Delete видаляє, Esc знімає вибір.
-            </p>
+        </header>
+
+        {sidebarOpen && (
+        <div className="sidebar-body">
+          {tab === "roof" && (
+            <>
+              <section className="group">
+                <h2 className="group-title">Розміри</h2>
+                <NumberField label="Ширина" unit="м" value={roofWidth} min={2} max={20} onChange={(v) => changeRoofSize(v, roofLength)} />
+                <NumberField label="Довжина схилу" unit="м" value={roofLength} min={2} max={10} onChange={(v) => changeRoofSize(roofWidth, v)} />
+                <NumberField label="Нахил" unit="°" value={tilt} min={0} max={90} step={1} onChange={setTilt} />
+              </section>
+
+              <section className="group">
+                <h2 className="group-title">Орієнтація</h2>
+                <NumberField label="Азимут скату" unit="°" value={azimuth} min={0} max={360} step={5} onChange={setAzimuth} />
+                <Segmented
+                  label="Сторона світу"
+                  value={[0, 90, 180, 270].includes(azimuth) ? azimuth : null}
+                  onChange={setAzimuth}
+                  options={[
+                    { value: 0, label: "Пн", title: "Північ, 0°" },
+                    { value: 90, label: "Сх", title: "Схід, 90°" },
+                    { value: 180, label: "Пд", title: "Південь, 180°" },
+                    { value: 270, label: "Зх", title: "Захід, 270°" },
+                  ]}
+                />
+                <p className="note">
+                  Карниз дивиться на <b>{compassName(azimuth)}</b>
+                </p>
+              </section>
+
+              <details className="group disclosure">
+                <summary className="group-title">Профіль листа</summary>
+                <NumberField label="Крок хвилі" unit="мм" value={toMm(profile.pitch)} min={pitchMinMm} max={400} step={1} onChange={(v) => setProfile({ ...profile, pitch: v / 1000 })} />
+                <NumberField label="Висота ребра" unit="мм" value={toMm(profile.height)} min={5} max={60} step={1} onChange={(v) => setProfile({ ...profile, height: v / 1000 })} />
+                <NumberField label="Ширина верхівки" unit="мм" value={toMm(profile.ribTop)} min={10} max={Math.max(10, ribTopMaxMm)} step={1} onChange={(v) => setProfile({ ...profile, ribTop: v / 1000 })} />
+                <NumberField label="Розбіг скосу" unit="мм" value={toMm(profile.ribSlope)} min={5} max={Math.max(5, slopeMaxMm)} step={1} onChange={(v) => setProfile({ ...profile, ribSlope: v / 1000 })} />
+                <NumberField label="Товщина листа" unit="мм" value={toMm(profile.thickness)} min={2} max={30} step={1} onChange={(v) => setProfile({ ...profile, thickness: v / 1000 })} />
+                <button type="button" className="btn btn-ghost btn-block" onClick={() => setProfile(DEFAULT_PROFILE)}>
+                  Повернути стандартний профіль
+                </button>
+              </details>
+            </>
           )}
 
-          <h3>Шари</h3>
-          <select value={layer} onChange={(e) => setLayer(e.target.value as LayerMode)}>
-            <option value="roof">Дах</option>
-            <option value="roofBlocks">Дах + блочки</option>
-            <option value="all">Дах + блочки + панелі</option>
-          </select>
+          {tab === "panels" && (
+            <>
+              <section className="group">
+                <h2 className="group-title">Модель</h2>
+                <select className="select" value={presetId} onChange={(e) => selectPreset(e.target.value)} aria-label="Модель панелі">
+                  <option value="custom">Власні розміри</option>
+                  {PANEL_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+                <NumberField label="Ширина, поперек хвилі" unit="м" value={panelParams.width} min={0.3} max={3} step={0.01} onChange={(v) => changePanel({ ...panelParams, width: v }, "custom")} />
+                <NumberField label="Висота, уздовж хвилі" unit="м" value={panelParams.height} min={0.3} max={3} step={0.01} onChange={(v) => changePanel({ ...panelParams, height: v }, "custom")} />
+                <NumberField label="Потужність" unit="Вт" value={panelParams.power} min={50} max={800} step={5} onChange={(v) => setPanelParams({ ...panelParams, power: v })} />
+                <NumberField label="Проміжок між панелями" unit="см" value={gapCm} min={1} max={10} step={0.5} onChange={changeGap} />
+              </section>
 
-          <p>
-            Режим: {mode === "auto" ? "авто" : "вручну"}
-            <br />
-            Панелей: {panels.length}, блоків: {blocks.length}
-            <br />
-            Потужність: {powerKw.toFixed(1)} кВт
-          </p>
-          {!blocksOk && (
-            <p style={{ color: "crimson" }}>
-              Блок закороткий: він не лягає на 2 хвилі профілю
-            </p>
+              <section className="group">
+                <h2 className="group-title">Відступи від країв</h2>
+                <NumberField label="Біля карниза" unit="см" value={eaveCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setEaveCm, v)} />
+                <NumberField label="Біля коника" unit="см" value={ridgeCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setRidgeCm, v)} />
+                <NumberField label="По боках" unit="см" value={sideCm} min={0} max={200} step={5} onChange={(v) => changeMargin(setSideCm, v)} />
+              </section>
+
+              <section className="group">
+                <h2 className="group-title">Блок кріплення</h2>
+                <Segmented
+                  label="Довжина блока"
+                  value={blockLength}
+                  onChange={setBlockLength}
+                  options={BLOCK_LENGTHS.map((l) => ({ value: l, label: `${Math.round(l * 100)} см` }))}
+                />
+                {!blocksOk && (
+                  <p className="note note-warn">
+                    <Icon name="warn" size={14} /> Блок закороткий: він не лягає на 2 хвилі профілю
+                  </p>
+                )}
+                <p className="note">Щоб виміряти блок, увімкни шар «Блоки» і клікни на нього.</p>
+              </section>
+            </>
+          )}
+
+          {tab === "sun" && (
+            <>
+              <section className="group">
+                <h2 className="group-title">Місце і дата</h2>
+                <NumberField label="Широта" unit="°" value={latitude} min={-85} max={85} step={0.5} onChange={setLatitude} />
+                <label className="field">
+                  <span className="field-label">Дата</span>
+                  <span className="field-control">
+                    <input
+                      className="field-input field-input-date"
+                      type="date"
+                      value={dateIso}
+                      onChange={(e) => {
+                        if (e.target.value) setDateIso(e.target.value);
+                      }}
+                    />
+                  </span>
+                </label>
+              </section>
+
+              <section className="group">
+                <div className="group-row">
+                  <h2 className="group-title">Сонячний час</h2>
+                  <span className="time-readout">{formatHour(solarHour)}</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min={0}
+                  max={24}
+                  step={0.05}
+                  value={solarHour}
+                  aria-label="Сонячний час"
+                  onChange={(e) => setSolarHour(Number(e.target.value))}
+                  style={
+                    {
+                      "--day-from": `${sunriseAt}%`,
+                      "--day-to": `${sunsetAt}%`,
+                    } as CSSProperties
+                  }
+                />
+                <div className="range-scale" aria-hidden="true">
+                  <span>0:00</span>
+                  <span>12:00</span>
+                  <span>24:00</span>
+                </div>
+              </section>
+
+              <section className="group">
+                <dl className="facts">
+                  <div>
+                    <dt>Висота</dt>
+                    <dd>{sun.elevationDeg.toFixed(1)}°</dd>
+                  </div>
+                  <div>
+                    <dt>Азимут</dt>
+                    <dd>
+                      {sun.azimuthDeg.toFixed(1)}° <small>{compassName(sun.azimuthDeg)}</small>
+                    </dd>
+                  </div>
+                  {dl.sunrise !== null && dl.sunset !== null ? (
+                    <>
+                      <div>
+                        <dt>Схід</dt>
+                        <dd>{formatHour(dl.sunrise)}</dd>
+                      </div>
+                      <div>
+                        <dt>Захід</dt>
+                        <dd>{formatHour(dl.sunset)}</dd>
+                      </div>
+                      <div className="facts-wide">
+                        <dt>Тривалість дня</dt>
+                        <dd>{formatHour(dl.sunset - dl.sunrise)}</dd>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="facts-wide">
+                      <dt>{dl.polar === "night" ? "Полярна ніч" : "Полярний день"}</dt>
+                      <dd>{dl.polar === "night" ? "Сонце не сходить" : "Сонце не заходить"}</dd>
+                    </div>
+                  )}
+                </dl>
+              </section>
+            </>
+          )}
+
+          {tab === "obstacles" && (
+            <>
+              <section className="group">
+                <button type="button" className="btn btn-primary btn-block" onClick={addObstacle}>
+                  <Icon name="plus" /> Додати перешкоду
+                </button>
+                <p className="note">
+                  {obstacles.length === 0
+                    ? "Перешкод поки немає. Додай димар, вентвихід чи мансардне вікно."
+                    : `Перешкод на даху: ${obstacles.length}.`}{" "}
+                  Панелі не ставляться ближче ніж на {Math.round(OBSTACLE_CLEARANCE * 100)} см до них.
+                </p>
+              </section>
+
+              {obstacles.length > 0 && (
+                <section className="group">
+                  <h2 className="group-title">Список</h2>
+                  <ul className="list">
+                    {obstacles.map((o, i) => (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          className="list-item"
+                          aria-current={o.id === selectedObstacleId || undefined}
+                          onClick={() => selectObstacle(o.id)}
+                        >
+                          <Icon name="box" />
+                          <span>Перешкода {i + 1}</span>
+                          <small>
+                            {o.width}×{o.depth}×{o.height} м
+                          </small>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {selectedObstacle && (
+                <section className="group" key={selectedObstacle.id}>
+                  <h2 className="group-title">Вибрана перешкода</h2>
+                  <NumberField label="Ширина" unit="м" value={selectedObstacle.width} min={0.1} max={roofWidth} step={0.05} onChange={(v) => updateObstacle(selectedObstacle.id, { width: v })} />
+                  <NumberField label="Глибина" unit="м" value={selectedObstacle.depth} min={0.1} max={roofLength} step={0.05} onChange={(v) => updateObstacle(selectedObstacle.id, { depth: v })} />
+                  <NumberField label="Висота" unit="м" value={selectedObstacle.height} min={0.1} max={5} step={0.05} onChange={(v) => updateObstacle(selectedObstacle.id, { height: v })} />
+                  <button type="button" className="btn btn-danger btn-block" onClick={() => deleteObstacle(selectedObstacle.id)}>
+                    <Icon name="trash" /> Видалити перешкоду
+                  </button>
+                </section>
+              )}
+            </>
           )}
         </div>
+        )}
+      </aside>
 
-        <div style={{ flex: 1, height: 600 }}>
-          <SolarScene
-            roof={roof}
-            profile={profile}
-            sun={sun}
-            panel={panelParams}
-            panels={panels}
-            blocks={blocks}
-            blockLength={blockLength}
-            layer={layer}
-            placing={placing}
-            rules={rules}
-            onPlace={placePanel}
-            selectedId={selected}
-            onSelect={selectPanel}
-            onDeselect={deselectAll}
-            drag={drag}
-            onDragStart={startDrag}
-            onDrop={dropDrag}
-            onCancelDrag={cancelDrag}
-            obstacles={obstacles}
-            selectedObstacleId={selectedObstacleId}
-            onSelectObstacle={selectObstacle}
-            obstacleDrag={obstacleDrag}
-            onObstacleDragStart={startObstacleDrag}
-            onObstacleDrop={dropObstacle}
-            onObstacleCancelDrag={cancelObstacleDrag}
-            selectedBlock={selectedBlock}
-            onSelectBlock={selectBlock}
+      <aside className="results glass" data-open={resultsOpen || undefined} inert={chromeHidden} aria-label="Результати">
+        <header className="results-head">
+          <div className="stats-power">
+            <span className="stats-value">{powerKw.toFixed(1)}</span>
+            <span className="stats-unit">кВт</span>
+            <button
+              type="button"
+              className="btn btn-icon btn-ghost results-toggle panel-toggle"
+              aria-expanded={resultsOpen}
+              aria-label={resultsOpen ? "Згорнути результати" : "Показати результати"}
+              title={resultsOpen ? "Згорнути результати" : "Показати результати"}
+              onClick={() => setResultsOpen((o) => !o)}
+            >
+              <Icon name="chevron" />
+            </button>
+          </div>
+          <dl className="stats-meta">
+            <div>
+              <dt>Панелей</dt>
+              <dd>{panels.length}</dd>
+            </div>
+            <div>
+              <dt>За рік</dt>
+              <dd>{formatNumber(year.annualKwh)} кВт·год</dd>
+            </div>
+            <div>
+              <dt>Окупність</dt>
+              <dd>{payback.paybackYears !== null ? `${formatNumber(payback.paybackYears, 1)} р.` : "—"}</dd>
+            </div>
+          </dl>
+          {!blocksOk && (
+            <p className="stats-warn">
+              <Icon name="warn" size={14} /> Блок закороткий
+            </p>
+          )}
+          {resultsOpen && (
+            <Segmented
+              label="Результати"
+              value={resultsTab}
+              onChange={setResultsTab}
+              options={[
+                { value: "energy", label: "Енергія" },
+                { value: "cost", label: "Кошторис" },
+              ]}
+            />
+          )}
+        </header>
+
+        {resultsOpen && (
+          <div className="sidebar-body">
+            {resultsTab === "energy" && (
+              <>
+                <section className="group">
+                  <dl className="facts">
+                    <div>
+                      <dt>Виробіток за рік</dt>
+                      <dd>{formatNumber(year.annualKwh)} <small>кВт·год</small></dd>
+                    </div>
+                    <div>
+                      <dt>На 1 кВт панелей</dt>
+                      <dd>{formatNumber(year.specificYield)} <small>кВт·год</small></dd>
+                    </div>
+                    <div>
+                      <dt>Ясний день {dateIso.slice(8, 10)}.{dateIso.slice(5, 7)}</dt>
+                      <dd>{formatNumber(daySim.energyKwh, 1)} <small>кВт·год</small></dd>
+                    </div>
+                    <div>
+                      <dt>Втрати від тіні</dt>
+                      <dd>{formatNumber(shadeLoss * 100, 1)}<small>%</small></dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section className="group">
+                  <h2 className="group-title">Потужність у ясний день, кВт</h2>
+                  <DayChart hours={daySim.hours} powerKw={daySim.powerKw} currentHour={solarHour} />
+                  <label className="switch">
+                    <input type="checkbox" checked={showShade} onChange={(e) => setShowShade(e.target.checked)} />
+                    <span>Підсвітити панелі, які затінюються цього дня</span>
+                  </label>
+                  {showShade && (
+                    <div className="shade-legend" aria-hidden="true">
+                      <span>без тіні</span>
+                      <i />
+                      <span>30% і більше</span>
+                    </div>
+                  )}
+                </section>
+
+                <section className="group">
+                  <h2 className="group-title">Виробіток по місяцях, кВт·год</h2>
+                  <MonthChart values={year.months.map((m) => m.kwh)} />
+                </section>
+              </>
+            )}
+
+            {resultsTab === "cost" && (
+              <>
+                <section className="group">
+                  <table className="bom">
+                    <tbody>
+                      {estimate.lines.map((l) => (
+                        <tr key={l.name}>
+                          <th>
+                            {l.name}
+                            <small>
+                              {formatNumber(l.qty, l.unit === "кВт" ? 2 : 0)} {l.unit} × {formatNumber(l.price)} грн
+                            </small>
+                          </th>
+                          <td>{formatNumber(l.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <th>Разом, грн</th>
+                        <td>{formatNumber(estimate.total)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </section>
+
+                <section className="group">
+                  <div className="group-row">
+                    <h2 className="group-title">Окупність</h2>
+                    <span className="time-readout">
+                      {payback.paybackYears !== null ? `${formatNumber(payback.paybackYears, 1)} р.` : "понад 25 р."}
+                    </span>
+                  </div>
+                  <PaybackChart points={payback.points} cost={estimate.total} paybackYears={payback.paybackYears} />
+                  <p className="note">
+                    Економія за 25 років: <b>{formatNumber(payback.lifetimeSavings)} грн</b>
+                  </p>
+                </section>
+
+                <section className="group">
+                  <h2 className="group-title">Ціни</h2>
+                  <NumberField label="Панель" unit="грн" value={prices.panel} min={0} max={100000} step={50} onChange={updatePrice("panel")} />
+                  <NumberField label="Блок кріплення" unit="грн" value={prices.block} min={0} max={10000} step={5} onChange={updatePrice("block")} />
+                  <NumberField label="Тариф за кВт·год" unit="грн" value={prices.tariff} min={0} max={50} step={0.01} onChange={updatePrice("tariff")} />
+                  <button type="button" className="btn btn-ghost btn-block" onClick={() => setPrices(DEFAULT_PRICES)}>
+                    Скинути ціни
+                  </button>
+                </section>
+              </>
+            )}
+          </div>
+        )}
+      </aside>
+
+      <Report
+        snapshot={snapshot}
+        createdAt={new Date().toLocaleDateString("uk-UA")}
+        rows={[
+          ["Дах", `${roofWidth} × ${roofLength} м, нахил ${tilt}°, азимут ${azimuth}° (${compassName(azimuth)})`],
+          ["Місце", `широта ${latitude}°`],
+          ["Панель", presetLabel],
+          ["Розміщення", `${panels.length} шт (${mode === "auto" ? "автоматично" : "вручну"}), проміжок ${gapCm} см`],
+          ["Відступи", `карниз ${eaveCm} см, коник ${ridgeCm} см, боки ${sideCm} см`],
+          ["Кріплення", `${blocks.length} блоків по ${Math.round(blockLength * 100)} см`],
+          ["Перешкоди", obstacles.length ? obstacles.map((o) => `${o.width}×${o.depth}×${o.height} м`).join("; ") : "немає"],
+        ]}
+        kwp={powerKw}
+        panelCount={panels.length}
+        year={year}
+        estimate={estimate}
+        payback={payback}
+        prices={prices}
+      />
+
+      <div className="dock">
+        {(notice ?? hint) && (
+          <p className="hint glass" key={notice ?? hint ?? ""} role="status">
+            {notice ?? hint}
+          </p>
+        )}
+        <div className="toolbar glass" role="toolbar" aria-label="Дії з панелями">
+          {chromeHidden && (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setChromeHidden(false)}
+                title="Показати меню"
+                aria-label="Показати меню"
+              >
+                <Icon name="menu" /> <span className="btn-text">Меню</span>
+              </button>
+              <span className="toolbar-sep" aria-hidden="true" />
+            </>
+          )}
+          <Segmented
+            label="Шари"
+            value={layer}
+            onChange={setLayer}
+            options={[
+              { value: "roof", label: "Дах", title: "Тільки дах" },
+              { value: "roofBlocks", label: "Блоки", title: "Дах і блоки кріплення" },
+              { value: "all", label: "Усе", title: "Дах, блоки й панелі" },
+            ]}
           />
+          <span className="toolbar-sep" aria-hidden="true" />
+          <button type="button" className="btn" onClick={fillAuto} title="Заповнити дах максимальною кількістю панелей">
+            <Icon name="grid" /> <span className="btn-text">Максимум</span>
+          </button>
+          <button
+            type="button"
+            className={placing ? "btn btn-primary" : "btn"}
+            aria-pressed={placing}
+            onClick={placing ? () => setPlacing(false) : startPlacing}
+          >
+            <Icon name={placing ? "check" : "plus"} />{" "}
+            <span className="btn-text">{placing ? "Готово" : "Додати"}</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-icon"
+            onClick={undoLast}
+            disabled={mode !== "manual" || manualPanels.length === 0}
+            title="Скасувати останню панель"
+            aria-label="Скасувати останню панель"
+          >
+            <Icon name="undo" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-icon"
+            onClick={deleteSelected}
+            disabled={selected === null}
+            title="Видалити вибрану панель (Delete)"
+            aria-label="Видалити вибрану панель"
+          >
+            <Icon name="trash" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-icon"
+            onClick={clearPanels}
+            disabled={panels.length === 0}
+            title="Прибрати всі панелі"
+            aria-label="Прибрати всі панелі"
+          >
+            <Icon name="clear" />
+          </button>
         </div>
       </div>
     </div>

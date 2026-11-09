@@ -39,6 +39,8 @@ function Roof({ params, profile, children }: RoofProps) {
         key={`${profile.pitch}-${profile.height}-${profile.ribTop}-${profile.ribSlope}-${profile.thickness}`}
         geometry={geometry}
         position={[0, profile.thickness, -params.length / 2]}
+        castShadow
+        receiveShadow
       >
         <meshStandardMaterial color="grey" />
       </mesh>
