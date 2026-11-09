@@ -5,13 +5,6 @@ export interface PanelParams {
   power: number;     // номінальна потужність, Вт
 }
 
-export const DEFAULT_PANEL: PanelParams = {
-  width: 1.1,
-  height: 1.7,
-  thickness: 0.035,
-  power: 400,
-};
-
 export interface PlacedPanel {
   id: number; // унікальний номер панелі
   x: number;  // центр, локальні координати даху, м

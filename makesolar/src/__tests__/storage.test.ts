@@ -33,4 +33,9 @@ describe("parseProject", () => {
     expect(parseProject(null)).toBeNull();
     expect(parseProject("text")).toBeNull();
   });
+
+  it("відкидає нульові та від'ємні розміри", () => {
+    expect(parseProject({ ...valid, profile: { ...valid.profile, pitch: 0 } })).toBeNull();
+    expect(parseProject({ ...valid, roof: { ...valid.roof, width: -5 } })).toBeNull();
+  });
 });

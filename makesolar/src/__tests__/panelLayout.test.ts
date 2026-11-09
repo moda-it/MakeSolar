@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computePanelLayout, countAlongAxis } from "../geometry/panelLayout";
+import { DEFAULT_PROFILE, getRibCenters } from "../geometry/roofProfile";
 
 describe("countAlongAxis", () => {
   it("враховує проміжки між панелями", () => {
@@ -35,6 +36,15 @@ describe("computePanelLayout", () => {
       expect(p.x + input.panelWidth / 2).toBeLessThanOrEqual(input.roofWidth / 2 - input.margins.side + 1e-9);
       expect(p.z - input.panelHeight / 2).toBeGreaterThanOrEqual(-input.roofLength + input.margins.ridge - 1e-9);
       expect(p.z + input.panelHeight / 2).toBeLessThanOrEqual(-input.margins.eave + 1e-9);
+    }
+  });
+});
+
+describe("getRibCenters", () => {
+  it("фактичний крок хвилі не менший за заданий", () => {
+    for (const width of [2, 2.3, 5.7, 10, 13.3]) {
+      const c = getRibCenters(width, { ...DEFAULT_PROFILE, pitch: 0.4 });
+      expect(c[1] - c[0]).toBeGreaterThanOrEqual(0.4 - 1e-9);
     }
   });
 });

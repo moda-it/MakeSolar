@@ -107,7 +107,7 @@ function Report({ snapshot, createdAt, rows, kwp, panelCount, year, estimate, pa
               <tr key={l.name}>
                 <th>{l.name}</th>
                 <td>
-                  {formatNumber(l.qty, l.unit === "кВт" ? 2 : 0)} {l.unit}
+                  {l.qty} {l.unit}
                 </td>
                 <td>{formatNumber(l.price)}</td>
                 <td>{formatNumber(l.total)}</td>

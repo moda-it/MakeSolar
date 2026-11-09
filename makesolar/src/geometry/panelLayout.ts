@@ -6,7 +6,7 @@ export function countAlongAxis(
   gap: number
 ): number {
   if (size <= 0 || available < size) return 0;
-  return Math.floor((available + gap) / (size + gap));
+  return Math.floor((available + gap) / (size + gap) + 1e-9);
 }
 
 function usedSize(count: number, size: number, gap: number): number {

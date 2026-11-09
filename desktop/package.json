@@ -1,0 +1,61 @@
+{
+  "name": "makesolar-desktop",
+  "productName": "MakeSolar",
+  "version": "1.0.0",
+  "description": "Проєктування сонячної станції на даху",
+  "author": "MakeSolar",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "web": "npm --prefix ../makesolar run build:desktop",
+    "start": "npm run web && electron .",
+    "dist:mac": "npm run web && electron-builder --mac",
+    "dist:win": "npm run web && electron-builder --win",
+    "dist": "npm run web && electron-builder --mac --win"
+  },
+  "build": {
+    "appId": "ua.makesolar.app",
+    "productName": "MakeSolar",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "web/**/*"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "MakeSolar-${version}-mac-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "MakeSolar-${version}-windows-portable.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  }
+}

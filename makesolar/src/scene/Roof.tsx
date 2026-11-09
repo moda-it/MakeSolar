@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import * as THREE from "three";
 import type { RoofParams } from "../types/roof";
 import {
@@ -30,13 +30,13 @@ function Roof({ params, profile, children }: RoofProps) {
     extruded.translate(-params.width / 2, 0, -params.length / 2);
     return extruded;
   }, [params.width, params.length, profile]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   const tiltRad = THREE.MathUtils.degToRad(params.tilt);
 
   return (
     <group rotation={[tiltRad, 0, 0]}>
       <mesh
-        key={`${profile.pitch}-${profile.height}-${profile.ribTop}-${profile.ribSlope}-${profile.thickness}`}
         geometry={geometry}
         position={[0, profile.thickness, -params.length / 2]}
         castShadow

@@ -21,10 +21,13 @@ function NumberField({
   onChange,
 }: NumberFieldProps) {
   const [text, setText] = useState(String(value));
+  const [shownValue, setShownValue] = useState(value);
 
-  useEffect(() => {
+  // Значення змінили ззовні: оновлюємо текст під час рендера, без зайвого ефекту
+  if (value !== shownValue) {
+    setShownValue(value);
     setText(String(value));
-  }, [value]);
+  }
 
   useEffect(() => {
     const parsed = Number(text);

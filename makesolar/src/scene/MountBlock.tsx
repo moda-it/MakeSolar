@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
 import {
@@ -30,6 +30,7 @@ function MountBlock({ length, position, selected = false, onSelect }: MountBlock
     extruded.translate(0, 0, -length / 2);
     return extruded;
   }, [length]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   function handleClick(e: ThreeEvent<MouseEvent>) {
     if (e.delta > 5) return;

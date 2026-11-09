@@ -1,4 +1,4 @@
-import type { Vec3 } from "../geometry/roofNormal";
+import type { Vec3 } from "../utils/math";
 
 const DEG = Math.PI / 180;
 

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { worldToRoofLocal } from "../solar/roofFrame";
-import { getRoofNormal } from "../geometry/roofNormal";
 
 const DEG = Math.PI / 180;
+
+// Нормаль південного схилу у світових координатах сцени
+function getRoofNormal(tiltDeg: number) {
+  return { x: 0, y: Math.cos(tiltDeg * DEG), z: Math.sin(tiltDeg * DEG) };
+}
 
 describe("worldToRoofLocal", () => {
   it("нормаль південного даху переходить у локальну вісь Y", () => {

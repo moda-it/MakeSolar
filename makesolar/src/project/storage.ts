@@ -28,23 +28,27 @@ function allNums(o: unknown, keys: string[]): boolean {
   return isObj(o) && keys.every((k) => isNum(o[k]));
 }
 
+function allPositive(o: unknown, keys: string[]): boolean {
+  return isObj(o) && keys.every((k) => isNum(o[k]) && o[k] > 0);
+}
+
 // Перевіряє структуру завантаженого JSON. Повертає null, якщо файл не схожий на проєкт.
 export function parseProject(raw: unknown): ProjectData | null {
   if (!isObj(raw) || raw.version !== PROJECT_VERSION) return null;
   const p = raw as unknown as ProjectData;
   const ok =
-    allNums(p.roof, ["width", "length", "tilt", "azimuth"]) &&
-    allNums(p.profile, ["pitch", "height", "ribTop", "ribSlope", "thickness"]) &&
+    allNums(p.roof, ["tilt", "azimuth"]) && allPositive(p.roof, ["width", "length"]) &&
+    allPositive(p.profile, ["pitch", "height", "ribTop", "ribSlope", "thickness"]) &&
     isObj(p.sun) && isNum(p.sun.latitude) && isNum(p.sun.hour) &&
     typeof p.sun.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.sun.date) &&
     isObj(p.panel) && typeof p.panel.presetId === "string" && isNum(p.panel.gapCm) &&
-    allNums(p.panel.params, ["width", "height", "thickness", "power"]) &&
+    allPositive(p.panel.params, ["width", "height", "thickness", "power"]) &&
     allNums(p.margins, ["sideCm", "ridgeCm", "eaveCm"]) &&
-    isNum(p.blockLength) &&
+    isNum(p.blockLength) && p.blockLength > 0 &&
     (p.mode === "auto" || p.mode === "manual") &&
     Array.isArray(p.manualPanels) && p.manualPanels.every((q) => allNums(q, ["id", "x", "z"])) &&
     Array.isArray(p.obstacles) &&
-    p.obstacles.every((o) => allNums(o, ["id", "x", "z", "width", "depth", "height"])) &&
+    p.obstacles.every((o) => allNums(o, ["id", "x", "z"]) && allPositive(o, ["width", "depth", "height"])) &&
     allNums(p.prices, ["panel", "block", "tariff"]);
   if (!ok) return null;
   // лишаємо тільки поточні поля цін (старі файли могли містити більше)
@@ -75,7 +79,7 @@ export function downloadProject(data: ProjectData): void {
   a.href = url;
   a.download = `makesolar-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function readProjectFile(file: File): Promise<ProjectData | null> {

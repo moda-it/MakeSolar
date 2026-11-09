@@ -26,11 +26,17 @@ export function profileTopY(profile: ProfileParams): number {
   return profile.thickness + profile.height;
 }
 
+// Кількість хвиль на ширині даху. Округлюємо вниз: фактичний крок тоді не менший
+// за заданий, і долинка не стає коротшою за PROFILE_MIN_VALLEY.
+function waveCount(totalWidth: number, profile: ProfileParams): number {
+  return Math.max(1, Math.floor(totalWidth / profile.pitch + 1e-9));
+}
+
 export function buildProfileOutline(
   totalWidth: number,
   profile: ProfileParams
 ): Point2D[] {
-  const waves = Math.max(1, Math.round(totalWidth / profile.pitch));
+  const waves = waveCount(totalWidth, profile);
   const pitch = totalWidth / waves;
   const valley = pitch - profile.ribTop - 2 * profile.ribSlope;
 
@@ -56,7 +62,7 @@ export function getRibCenters(
   totalWidth: number,
   profile: ProfileParams
 ): number[] {
-  const waves = Math.max(1, Math.round(totalWidth / profile.pitch));
+  const waves = waveCount(totalWidth, profile);
   const pitch = totalWidth / waves;
   const valley = pitch - profile.ribTop - 2 * profile.ribSlope;
 

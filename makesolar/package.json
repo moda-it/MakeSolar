@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "start": "npm run dev",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:desktop": "tsc -b && vite build --base ./ --outDir ../desktop/web --emptyOutDir"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",

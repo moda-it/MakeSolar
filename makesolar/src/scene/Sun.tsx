@@ -1,5 +1,5 @@
 import { Line } from "@react-three/drei";
-import type { Vec3 } from "../geometry/roofNormal";
+import type { Vec3 } from "../utils/math";
 
 const DISTANCE = 18;
 

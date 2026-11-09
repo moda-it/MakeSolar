@@ -1,4 +1,4 @@
-import type { Vec3 } from "../geometry/roofNormal";
+import type { Vec3 } from "../utils/math";
 import type { Obstacle } from "../types/obstacle";
 import type { PanelParams, PlacedPanel } from "../types/panel";
 import { sunAngles, sunDirection } from "./sunPosition";

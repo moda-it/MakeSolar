@@ -6,22 +6,19 @@ import Icon from "./components/Icon";
 import type { RoofParams } from "./types/roof";
 import type { LayerMode } from "./types/layers";
 import type { Obstacle, ObstacleDragState } from "./types/obstacle";
-import {
-  type DragState,
-  type PanelParams,
-  type PlacedPanel,
-} from "./types/panel";
+import type { DragState, PanelParams, PlacedPanel } from "./types/panel";
 import { PANEL_PRESETS } from "./data/panelPresets";
 import { computePanelLayout } from "./geometry/panelLayout";
 import {
   computeBlocksForPanels,
   blockSpansTwoRibs,
 } from "./geometry/blockLayout";
-import { BLOCK_LENGTHS } from "./geometry/blockProfile";
+import { BLOCK_LENGTHS, DEFAULT_BLOCK_PROFILE } from "./geometry/blockProfile";
 import {
   DEFAULT_PROFILE,
   PROFILE_MIN_VALLEY,
   getRibCenters,
+  profileTopY,
   type ProfileParams,
 } from "./geometry/roofProfile";
 import {
@@ -33,8 +30,6 @@ import {
 } from "./geometry/placement";
 import { compassName } from "./geometry/compass";
 import { computeSunState, dayOfYear, formatHour } from "./solar/sunPosition";
-import { profileTopY } from "./geometry/roofProfile";
-import { DEFAULT_BLOCK_PROFILE } from "./geometry/blockProfile";
 import { simulateDay, simulateYear, type EnergyInput } from "./solar/energy";
 import {
   DEFAULT_PRICES,
@@ -356,7 +351,7 @@ function App() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, selectedObstacleId, obstacles, rules]);
+  }); // без залежностей: обробник щоразу бачить свіжий стан
 
   function resetPanels() {
     setMode("auto");
@@ -712,7 +707,10 @@ function App() {
                 </select>
                 <NumberField label="Ширина, поперек хвилі" unit="м" value={panelParams.width} min={0.3} max={3} step={0.01} onChange={(v) => changePanel({ ...panelParams, width: v }, "custom")} />
                 <NumberField label="Висота, уздовж хвилі" unit="м" value={panelParams.height} min={0.3} max={3} step={0.01} onChange={(v) => changePanel({ ...panelParams, height: v }, "custom")} />
-                <NumberField label="Потужність" unit="Вт" value={panelParams.power} min={50} max={800} step={5} onChange={(v) => setPanelParams({ ...panelParams, power: v })} />
+                <NumberField label="Потужність" unit="Вт" value={panelParams.power} min={50} max={800} step={5} onChange={(v) => {
+                  setPanelParams({ ...panelParams, power: v });
+                  setPresetId("custom");
+                }} />
                 <NumberField label="Проміжок між панелями" unit="см" value={gapCm} min={1} max={10} step={0.5} onChange={changeGap} />
               </section>
 
@@ -988,7 +986,7 @@ function App() {
                           <th>
                             {l.name}
                             <small>
-                              {formatNumber(l.qty, l.unit === "кВт" ? 2 : 0)} {l.unit} × {formatNumber(l.price)} грн
+                              {l.qty} {l.unit} × {formatNumber(l.price)} грн
                             </small>
                           </th>
                           <td>{formatNumber(l.total)}</td>

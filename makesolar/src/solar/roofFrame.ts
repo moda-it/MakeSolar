@@ -1,4 +1,4 @@
-import type { Vec3 } from "../geometry/roofNormal";
+import type { Vec3 } from "../utils/math";
 import { azimuthToRotationY } from "../geometry/compass";
 
 const DEG = Math.PI / 180;
