@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import Roof from "./roof";
+import Roof from "./Roof";
 import MountBlock from "./MountBlock";
-import SolarPanel from "./solarPanel";
+import SolarPanel from "./SolarPanel";
 import ObstacleBox from "./ObstacleBox";
 import PlacementLayer from "./PlacementLayer";
 import DragLayer from "./DragLayer";
